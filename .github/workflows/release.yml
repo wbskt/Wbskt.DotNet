@@ -1,0 +1,58 @@
+name: Release
+
+# On a tag v<version>, checks the SDK again, then packs it and pushes it to NuGet as `Wbskt`
+# through trusted publishing: nuget.org must have a policy trusting this repository and this
+# workflow, and the NUGET_USER secret names the nuget.org account that owns the package. The
+# login hands back an API key that lasts an hour; no key is stored.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  # Fails in seconds, before the suites run, for a tag that names the wrong version or a commit
+  # that isn't on master. A version can't be replaced once it is on NuGet.
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the tag matches the package version
+        run: |
+          version="$(sed -n 's:.*<SdkPackageVersion>\(.*\)</SdkPackageVersion>.*:\1:p' Directory.Build.props)"
+          if [[ "v$version" != "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match SdkPackageVersion $version"
+            exit 1
+          fi
+      - name: Check the tagged commit is on master
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::${GITHUB_REF_NAME} points at a commit that is not on master"
+            exit 1
+          fi
+
+  checks:
+    needs: tag
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet pack src/Wbskt/Wbskt.csproj -c Release -o packages --nologo
+      - uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - run: dotnet nuget push "packages/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
