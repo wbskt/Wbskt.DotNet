@@ -1,4 +1,3 @@
-using Wbskt.Protocol;
 using Wbskt.Internal;
 
 namespace Wbskt;
@@ -342,7 +341,7 @@ public sealed class WbsktClient : IWbsktClient
             throw new RegistrationRequiredException();
         }
 
-        var (newId, newSecret) = await _auth.RegisterAsync();
+        var (newId, newSecret) = await _auth.RegisterAsync(_config.PolicyPin);
         await _storage.SaveCredentialsAsync(newId, newSecret);
         
         return (newId, newSecret);
