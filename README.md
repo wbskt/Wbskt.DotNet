@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/wbskt/Wbskt.DotNet/master/assets/icon.png" alt="" width="64" height="64">
+
 # Wbskt
 
 Connect a board, script or service to [Wbskt](https://wbskt.com). It registers with a policy PIN
