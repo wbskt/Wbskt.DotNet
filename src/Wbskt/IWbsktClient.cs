@@ -1,5 +1,3 @@
-using Wbskt.Internal;
-
 namespace Wbskt;
 
 public interface IWbsktClient : IAsyncDisposable
