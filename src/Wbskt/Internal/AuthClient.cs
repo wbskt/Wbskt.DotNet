@@ -2,10 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security;
 using System.Text.Json;
-using Wbskt.Client.Sdk.Models;
 using Wbskt.Protocol;
 
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 internal sealed class AuthClient : IDisposable
 {

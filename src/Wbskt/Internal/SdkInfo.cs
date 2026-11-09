@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 // Auto-detected metadata reported to the platform in the "capabilities" message,
 // so every client shows its SDK and platform without any app code.

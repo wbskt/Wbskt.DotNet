@@ -1,8 +1,7 @@
 using Wbskt.Protocol;
-using Wbskt.Client.Sdk.Internal;
-using Wbskt.Client.Sdk.Models;
+using Wbskt.Internal;
 
-namespace Wbskt.Client.Sdk;
+namespace Wbskt;
 
 public sealed class WbsktClient : IWbsktClient
 {

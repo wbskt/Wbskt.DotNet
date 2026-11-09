@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Wbskt.Client.Sdk;
+namespace Wbskt;
 
 /// <summary>
 /// Keeps the client's credentials in a JSON file, so it registers once and signs in with them on

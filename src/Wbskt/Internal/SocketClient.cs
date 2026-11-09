@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Wbskt.Protocol;
 
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 internal sealed class SocketClient : IAsyncDisposable
 {

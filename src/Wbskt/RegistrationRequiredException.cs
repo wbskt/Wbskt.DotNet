@@ -1,4 +1,4 @@
-namespace Wbskt.Client.Sdk;
+namespace Wbskt;
 
 /// <summary>
 /// The client has no stored credentials and no policy PIN to register with, so it can never connect.

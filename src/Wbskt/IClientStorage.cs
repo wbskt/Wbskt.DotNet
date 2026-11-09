@@ -1,4 +1,4 @@
-namespace Wbskt.Client.Sdk;
+namespace Wbskt;
 
 public interface IClientStorage
 {

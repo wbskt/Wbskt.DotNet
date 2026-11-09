@@ -1,4 +1,4 @@
-namespace Wbskt.Client.Sdk.Models;
+namespace Wbskt;
 
 /// <param name="OfflineBufferSize">
 /// How many messages <see cref="IWbsktClient.SendAsync"/> keeps in memory while the client is

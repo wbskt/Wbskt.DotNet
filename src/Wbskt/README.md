@@ -1,17 +1,16 @@
-# Wbskt.Client
+# Wbskt
 
 Connect a board, script or service to [Wbskt](https://wbskt.com). It registers with a policy PIN
 once, keeps the credentials it gets, holds a WebSocket open, buffers messages while offline and
 reconnects on its own.
 
 ```bash
-dotnet add package Wbskt.Client --prerelease
+dotnet add package Wbskt --prerelease
 ```
 
 This is a 0.9 beta (`--prerelease` finds it): the client protocol it speaks may still change before 1.0.
 
 ```csharp
-using Wbskt.Client.Sdk;
 
 await using var wbskt = new WbsktClient("greenhouse-sensor", "your-policy-pin");
 
