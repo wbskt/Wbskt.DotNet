@@ -49,3 +49,13 @@ handler that throws doesn't drop the connection; the exception is raised on `OnH
 The wire protocol every Wbskt SDK implements is documented in
 [Docs/Client.Protocol.md](https://github.com/wbskt/Wbskt/blob/master/Docs/Client.Protocol.md), with the
 WebSocket specifics in [Docs/Client.Protocol.WebSocket.md](https://github.com/wbskt/Wbskt/blob/master/Docs/Client.Protocol.WebSocket.md).
+
+## Development
+
+```bash
+dotnet build Wbskt.slnx
+dotnet test Wbskt.slnx
+```
+
+[CONTRIBUTING.md](https://github.com/wbskt/Wbskt.DotNet/blob/master/CONTRIBUTING.md) has the commit and PR rules, how the shared conformance suite is
+run, and how a release is cut.
