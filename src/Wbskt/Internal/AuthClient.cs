@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security;
 using System.Text.Json;
-using Wbskt.Protocol;
 
 namespace Wbskt.Internal;
 
@@ -17,9 +16,9 @@ internal sealed class AuthClient : IDisposable
         _httpClient = new HttpClient { BaseAddress = new Uri(config.BaseApiUrl) };
     }
 
-    public async Task<(Guid ClientRefId, string Secret)> RegisterAsync()
+    public async Task<(Guid ClientRefId, string Secret)> RegisterAsync(string pin)
     {
-        var response = await _httpClient.PostAsJsonAsync("api/v1/client-registrations/initiate", new ClientRegistrationRequest(_config.PolicyPin, _config.ClientName));
+        var response = await _httpClient.PostAsJsonAsync("api/v1/client-registrations/initiate", new ClientRegistrationRequest(pin, _config.ClientName));
 
         if (!response.IsSuccessStatusCode)
         {

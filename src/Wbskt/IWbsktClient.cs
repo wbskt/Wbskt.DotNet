@@ -1,4 +1,4 @@
-using Wbskt.Protocol;
+using Wbskt.Internal;
 
 namespace Wbskt;
 

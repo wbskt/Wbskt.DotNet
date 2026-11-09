@@ -1,5 +1,4 @@
 using System.Net.WebSockets;
-using Wbskt.Protocol;
 
 namespace Wbskt.Internal;
 
