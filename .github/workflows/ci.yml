@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          # 8.0 runs the net8.0 tests; global.json picks the SDK that builds.
+          dotnet-version: '8.0.x'
+          global-json-file: global.json
+      - run: dotnet build Wbskt.slnx -c Release --nologo
+      - run: dotnet test Wbskt.slnx -c Release --no-build --nologo
+      - run: dotnet pack src/Wbskt/Wbskt.csproj -c Release --no-build -o packages --nologo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: packages/
+
+  conformance:
+    # The client protocol checklist (Tests/Conformance in wbskt/Wbskt), run against this SDK
+    # through conformance/Wbskt.Conformance.Harness.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: wbskt/Wbskt
+          path: wbskt
+          sparse-checkout: Tests/Conformance
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build the harness
+        run: dotnet build conformance/Wbskt.Conformance.Harness -c Release -o "$RUNNER_TEMP/harness" --nologo -v q
+      - name: Run the suite
+        working-directory: wbskt/Tests/Conformance
+        run: |
+          pip install -r requirements.txt
+          WBSKT_HARNESS="dotnet $RUNNER_TEMP/harness/Wbskt.Conformance.Harness.dll" python -m pytest -v
