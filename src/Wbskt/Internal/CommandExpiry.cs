@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 /// <summary>
 /// Reads a command frame's optional <c>expiresAt</c>. A command past it is refused, not raised: a

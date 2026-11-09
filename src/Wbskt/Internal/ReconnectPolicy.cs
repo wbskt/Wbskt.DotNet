@@ -1,4 +1,4 @@
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 /// <summary>
 /// When to try again after the connection drops. Every delay is drawn at random from zero up to a

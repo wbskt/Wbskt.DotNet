@@ -1,4 +1,4 @@
-namespace Wbskt.Client.Sdk;
+namespace Wbskt;
 
 /// <summary>Where <see cref="WbsktClient(string, string)"/> connects when no URLs are given: the hosted Wbskt service.</summary>
 public static class WbsktDefaults

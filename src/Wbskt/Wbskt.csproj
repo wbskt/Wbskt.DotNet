@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <!-- net8.0 for the LTS most boards (Raspberry Pi OS, Debian) ship; net10.0 for the hosts and tests. -->
@@ -8,7 +8,7 @@
     <LangVersion>latest</LangVersion>
 
     <IsPackable>true</IsPackable>
-    <PackageId>Wbskt.Client</PackageId>
+    <PackageId>Wbskt</PackageId>
     <Version>$(SdkPackageVersion)</Version>
     <Description>Connect a board, script or service to Wbskt: register with a policy PIN, hold a WebSocket open, send readings and receive commands. Buffers while offline and reconnects with jitter.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -21,11 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Wbskt.Protocol\Wbskt.Protocol.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="Wbskt.Host.Tests" />
+    <InternalsVisibleTo Include="Wbskt.Tests" />
   </ItemGroup>
 
 </Project>

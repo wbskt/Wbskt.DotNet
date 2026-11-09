@@ -1,6 +1,6 @@
 using System.Security;
 
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 /// <summary>A client access token and when it stops being accepted.</summary>
 internal sealed record ClientToken(string Value, DateTimeOffset ExpiresAt)

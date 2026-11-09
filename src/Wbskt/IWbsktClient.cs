@@ -1,7 +1,6 @@
-using Wbskt.Client.Sdk.Models;
 using Wbskt.Protocol;
 
-namespace Wbskt.Client.Sdk;
+namespace Wbskt;
 
 public interface IWbsktClient : IAsyncDisposable
 {

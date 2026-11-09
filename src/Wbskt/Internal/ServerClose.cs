@@ -1,7 +1,7 @@
 using System.Net.WebSockets;
 using Wbskt.Protocol;
 
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 /// <summary>Why the gateway ended the last connection, as far as the reconnect schedule cares.</summary>
 internal enum ServerClose

@@ -1,7 +1,6 @@
 using Wbskt.Protocol;
-using Wbskt.Client.Sdk.Models;
 
-namespace Wbskt.Client.Sdk.Internal;
+namespace Wbskt.Internal;
 
 /// <summary>
 /// Bounded, in-memory FIFO of messages waiting for a connection. When full, the oldest
