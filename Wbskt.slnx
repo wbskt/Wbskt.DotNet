@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Wbskt.Tests/Wbskt.Tests.csproj" />
   </Folder>
+  <Folder Name="/conformance/">
+    <Project Path="conformance/Wbskt.Conformance.Harness/Wbskt.Conformance.Harness.csproj" />
+  </Folder>
 </Solution>
