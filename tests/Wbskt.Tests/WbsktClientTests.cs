@@ -27,8 +27,46 @@ public sealed class WbsktClientTests
         client.PendingMessageCount.Should().Be(1);
     }
 
-    private static WbsktClient NewClient() =>
-        new(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", "pin"), new MemoryStorage());
+    [Fact]
+    public async Task A_failed_first_attempt_is_raised_with_why()
+    {
+        await using var client = NewClient();
+        var failed = new TaskCompletionSource<Exception>();
+        client.OnConnectFailed += error => failed.TrySetResult(error);
+
+        await client.StartAsync();
+
+        (await failed.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeAssignableTo<HttpRequestException>();
+    }
+
+    [Fact]
+    public async Task No_credentials_and_no_pin_is_raised_as_well_as_thrown()
+    {
+        await using var client = NewClient(pin: null);
+        Exception? raised = null;
+        client.OnConnectFailed += error => raised = error;
+
+        var start = () => client.StartAsync();
+
+        await start.Should().ThrowAsync<RegistrationRequiredException>();
+        raised.Should().BeOfType<RegistrationRequiredException>();
+    }
+
+    [Fact]
+    public async Task A_connect_failed_handler_that_throws_is_reported_not_raised()
+    {
+        await using var client = NewClient();
+        var reported = new TaskCompletionSource<Exception>();
+        client.OnConnectFailed += _ => throw new InvalidOperationException("app bug");
+        client.OnHandlerError += error => reported.TrySetResult(error);
+
+        await client.StartAsync();
+
+        (await reported.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeOfType<InvalidOperationException>();
+    }
+
+    private static WbsktClient NewClient(string? pin = "pin") =>
+        new(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", pin), new MemoryStorage());
 
     private sealed class MemoryStorage : IClientStorage
     {

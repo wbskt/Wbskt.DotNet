@@ -60,6 +60,14 @@ that is `async void`, and an exception after its first `await` ends the process.
 `OnDisconnected` and `OnSuperseded` are guarded the same way: the client still announces itself and
 reconnects.
 
+**Not connecting?** `OnConnectFailed` is raised with the reason for every failed attempt (a wrong PIN,
+a full policy, approval pending, a revoked client, a wrong URL, TLS), while the client keeps retrying.
+If the saved credentials are rejected and there is no PIN to register again, it is raised with
+`RegistrationRequiredException` and the client stops: start it again with a PIN.
+
+**Message size.** A message over 64 KB once serialised throws `ArgumentException` from `SendAsync` or
+`ReportStateAsync`; send a link to anything bigger.
+
 The wire protocol every Wbskt SDK implements is documented in
 [Docs/Client.Protocol.md](https://github.com/wbskt/Wbskt/blob/master/Docs/Client.Protocol.md), with the
 WebSocket specifics in [Docs/Client.Protocol.WebSocket.md](https://github.com/wbskt/Wbskt/blob/master/Docs/Client.Protocol.WebSocket.md).
