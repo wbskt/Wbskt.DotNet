@@ -38,6 +38,8 @@ public sealed class WbsktClient : IWbsktClient
     }
 
     public event Action<Exception>? OnHandlerError;
+
+    public event Action<Exception>? OnConnectFailed;
     public event Action? OnConnected;
     public event Action? OnDisconnected;
 
@@ -83,8 +85,8 @@ public sealed class WbsktClient : IWbsktClient
 
     /// <summary>
     /// Makes the first connection attempt and returns once it has finished, connected or not. A
-    /// failed attempt is retried in the background; only <see cref="RegistrationRequiredException"/>
-    /// is thrown, because no retry can fix it.
+    /// failed attempt is raised on <see cref="OnConnectFailed"/> and retried in the background; only
+    /// <see cref="RegistrationRequiredException"/> is thrown, because no retry can fix it.
     /// </summary>
     public async Task StartAsync()
     {
@@ -95,12 +97,14 @@ public sealed class WbsktClient : IWbsktClient
         {
             await ConnectInternalAsync();
         }
-        catch (RegistrationRequiredException)
+        catch (RegistrationRequiredException ex)
         {
+            RaiseConnectFailed(ex);
             throw;
         }
         catch (Exception ex)
         {
+            RaiseConnectFailed(ex);
             retryIn = FailureDelay(ex, failures++);
         }
 
@@ -234,14 +238,29 @@ public sealed class WbsktClient : IWbsktClient
                 await ConnectInternalAsync();
                 failures = 0;
             }
+            catch (RegistrationRequiredException ex)
+            {
+                // The saved credentials were rejected and there is no PIN to register with again: no retry can fix it.
+                RaiseConnectFailed(ex);
+                return;
+            }
             catch (Exception ex)
             {
+                RaiseConnectFailed(ex);
                 await Task.Delay(FailureDelay(ex, failures++), _cts.Token);
             }
         }
     }
 
-    private TimeSpan FailureDelay(Exception error, int failures) =>
+    private void RaiseConnectFailed(Exception error)
+    {
+        if (!_cts.IsCancellationRequested)
+        {
+            Handlers.Raise(OnConnectFailed, handler => handler(error), OnHandlerError);
+        }
+    }
+
+        private TimeSpan FailureDelay(Exception error, int failures) =>
         error is ClientLoginThrottledException { RetryAfter: { } retryAfter }
             ? _reconnect.AfterThrottle(retryAfter)
             : _reconnect.RetryDelay(failures);

@@ -17,11 +17,19 @@ public interface IWbsktClient : IAsyncDisposable
 
     /// <summary>
     /// A handler of this client's events threw (<see cref="OnMessageReceived"/>, <see cref="OnConnected"/>,
-    /// <see cref="OnDisconnected"/> and the client's <c>OnSuperseded</c>). The connection stays up, and
+    /// <see cref="OnDisconnected"/>, <see cref="OnConnectFailed"/> and the client's <c>OnSuperseded</c>). The connection stays up, and
     /// the client still reconnects.
     /// </summary>
     event Action<Exception>? OnHandlerError;
     event Action? OnConnected;
+
+    /// <summary>
+    /// A connection attempt failed, with why: a wrong PIN or a full policy, approval still pending, a
+    /// revoked client, an unreachable URL, a TLS error. Raised for every attempt; the client keeps retrying
+    /// on its schedule, except after a <see cref="RegistrationRequiredException"/> (the saved credentials
+    /// were rejected and there is no PIN), when it stops: start a new client with a PIN.
+    /// </summary>
+    event Action<Exception>? OnConnectFailed;
     event Action? OnDisconnected;
 
     /// <summary>Messages waiting in the offline buffer.</summary>
