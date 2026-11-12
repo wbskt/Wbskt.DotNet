@@ -1,26 +1,36 @@
 namespace Wbskt.Internal;
 
 /// <summary>
-/// Raises an app's event so that a handler that throws cannot break the SDK: its exception goes to
-/// the error handler instead, and an error handler that throws is ignored.
+/// Raises an app's event so that a handler that throws cannot break the SDK: each subscriber is called
+/// on its own, its exception goes to the error handler, and an error handler that throws is ignored.
 /// </summary>
 internal static class Handlers
 {
-    public static void Raise(Action? handler, Action<Exception>? onError)
+    public static void Raise(Action? handlers, Action<Exception>? onError) => Raise(handlers, handler => handler(), onError);
+
+    public static void Raise<T>(T? handlers, Action<T> invoke, Action<Exception>? onError) where T : Delegate
     {
-        try
+        if (handlers is null)
         {
-            handler?.Invoke();
+            return;
         }
-        catch (Exception error)
+
+        foreach (var handler in handlers.GetInvocationList())
         {
             try
             {
-                onError?.Invoke(error);
+                invoke((T)handler);
             }
-            catch
+            catch (Exception error)
             {
-                // An error handler that throws is ignored too.
+                try
+                {
+                    onError?.Invoke(error);
+                }
+                catch
+                {
+                    // An error handler that throws is ignored too.
+                }
             }
         }
     }

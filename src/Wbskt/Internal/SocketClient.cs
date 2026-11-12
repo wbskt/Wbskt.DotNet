@@ -70,9 +70,10 @@ internal sealed class SocketClient : IAsyncDisposable
             TokenRejected = _webSocket.HttpStatusCode == HttpStatusCode.Unauthorized;
             throw;
         }
-        // The loop runs before anyone hears of the connection, so a handler that throws cannot leave it unread.
-        _ = Task.Run(ReceiveLoopAsync, _cts.Token);
+        // Raised before the loop starts, so capabilities are sent before any pong or ack and the app hears
+        // of the connection before its first message; the guard means a throwing handler cannot stop the loop.
         Handlers.Raise(OnConnected, OnHandlerError);
+        _ = Task.Run(ReceiveLoopAsync, _cts.Token);
     }
 
     public async Task SendAsync(ProtocolMessage message)
@@ -213,7 +214,7 @@ internal sealed class SocketClient : IAsyncDisposable
         {
             await foreach (var message in _inbox.Reader.ReadAllAsync(_dispatchCts.Token))
             {
-                Handlers.Raise(() => OnMessageReceived?.Invoke(message.Type, message.Payload, message.CommandId), OnHandlerError);
+                Handlers.Raise(OnMessageReceived, handler => handler(message.Type, message.Payload, message.CommandId), OnHandlerError);
             }
         }
         catch (OperationCanceledException)
