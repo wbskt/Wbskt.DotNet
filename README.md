@@ -46,7 +46,9 @@ are paced at 8 a second after a burst of 50, under the gateway's limit, so a ful
 two minutes to drain.
 
 **Handlers.** Messages reach `OnMessageReceived` one at a time, in order, on the SDK's own task. A
-handler that throws doesn't drop the connection; the exception is raised on `OnHandlerError`.
+handler that throws doesn't drop the connection; the exception is raised on `OnHandlerError`. The same
+holds for `OnConnected`, `OnDisconnected` and `OnSuperseded`: the client still announces itself and
+reconnects.
 
 The wire protocol every Wbskt SDK implements is documented in
 [Docs/Client.Protocol.md](https://github.com/wbskt/Wbskt/blob/master/Docs/Client.Protocol.md), with the

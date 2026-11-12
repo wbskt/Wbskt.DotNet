@@ -18,7 +18,7 @@ internal sealed class SocketClient : IAsyncDisposable
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
-    /// <summary>The app's message handler threw. The connection stays up and the next message is handed over as usual.</summary>
+    /// <summary>An app's handler threw. The connection stays up and the next message is handed over as usual.</summary>
     public event Action<Exception>? OnHandlerError;
     public event Action? OnConnected;
     public event Action? OnDisconnected;
@@ -70,9 +70,9 @@ internal sealed class SocketClient : IAsyncDisposable
             TokenRejected = _webSocket.HttpStatusCode == HttpStatusCode.Unauthorized;
             throw;
         }
-        OnConnected?.Invoke();
-        
+        // The loop runs before anyone hears of the connection, so a handler that throws cannot leave it unread.
         _ = Task.Run(ReceiveLoopAsync, _cts.Token);
+        Handlers.Raise(OnConnected, OnHandlerError);
     }
 
     public async Task SendAsync(ProtocolMessage message)
@@ -134,7 +134,7 @@ internal sealed class SocketClient : IAsyncDisposable
         finally
         {
             await AbortAsync();
-            OnDisconnected?.Invoke();
+            Handlers.Raise(OnDisconnected, OnHandlerError);
         }
     }
 
@@ -213,21 +213,7 @@ internal sealed class SocketClient : IAsyncDisposable
         {
             await foreach (var message in _inbox.Reader.ReadAllAsync(_dispatchCts.Token))
             {
-                try
-                {
-                    OnMessageReceived?.Invoke(message.Type, message.Payload, message.CommandId);
-                }
-                catch (Exception error)
-                {
-                    try
-                    {
-                        OnHandlerError?.Invoke(error);
-                    }
-                    catch
-                    {
-                        // An error handler that throws is ignored too.
-                    }
-                }
+                Handlers.Raise(() => OnMessageReceived?.Invoke(message.Type, message.Payload, message.CommandId), OnHandlerError);
             }
         }
         catch (OperationCanceledException)

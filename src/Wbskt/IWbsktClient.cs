@@ -6,7 +6,11 @@ public interface IWbsktClient : IAsyncDisposable
     // Handed over one at a time, in arrival order, on the SDK's own task: a slow handler doesn't delay pongs.
     event Action<string, object?, string?>? OnMessageReceived;
 
-    /// <summary>An <see cref="OnMessageReceived"/> handler threw. The connection stays up.</summary>
+    /// <summary>
+    /// A handler of this client's events threw (<see cref="OnMessageReceived"/>, <see cref="OnConnected"/>,
+    /// <see cref="OnDisconnected"/> and the client's <c>OnSuperseded</c>). The connection stays up, and
+    /// the client still reconnects.
+    /// </summary>
     event Action<Exception>? OnHandlerError;
     event Action? OnConnected;
     event Action? OnDisconnected;
