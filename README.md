@@ -13,6 +13,8 @@ dotnet add package Wbskt --prerelease
 This is a 0.9 beta (`--prerelease` finds it): the client protocol it speaks may still change before 1.0.
 
 ```csharp
+using System.Text.Json;
+using Wbskt;
 
 await using var wbskt = new WbsktClient("greenhouse-sensor", "your-policy-pin");
 
@@ -56,13 +58,14 @@ two minutes to drain.
 
 **Handlers.** Messages reach `MessageHandler` one at a time, in order, on the SDK's own task: each
 call is awaited before the next message is handed over, and a slow handler doesn't delay the
-connection's pings. Pass the token on to anything slow: it is cancelled when the client is disposed.
-Don't wait inside a handler for a later message; it can't arrive until the handler returns. The payload is a `JsonElement`. A handler that throws, before or after an
-`await`, doesn't drop the connection; the exception is raised on `OnHandlerError`. The
-`OnMessageReceived` event still works for synchronous handlers, but don't give it an `async` lambda:
-that is `async void`, and an exception after its first `await` ends the process. `OnConnected`,
-`OnDisconnected` and `OnSuperseded` are guarded the same way: the client still announces itself and
-reconnects.
+connection's pings. The payload is a `JsonElement`. Pass the token on to anything slow: it is
+cancelled when the client is disposed, and no further message is handed over after that. Don't wait
+inside a handler for a later message; it can't arrive until the handler returns. A handler that
+throws, before or after an `await`, doesn't drop the connection; the exception is raised on
+`OnHandlerError`. The `OnMessageReceived` event still works for synchronous handlers, but don't give
+it an `async` lambda: that is `async void`, and an exception after its first `await` ends the
+process. `OnConnected`, `OnDisconnected` and `OnSuperseded` are guarded the same way: the client
+still announces itself and reconnects.
 
 **Not connecting?** `OnConnectFailed` is raised with the exception for every failed attempt (an
 unreachable URL, TLS, or a refused registration or login, for now told apart only by its message),

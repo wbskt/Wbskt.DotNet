@@ -18,7 +18,7 @@ public sealed class WbsktClientTests
     }
 
     [Fact]
-    public async Task Capabilities_over_64_KB_are_refused_and_the_previous_ones_kept()
+    public async Task Capabilities_over_64_KB_are_refused_and_a_later_update_still_goes_through()
     {
         await using var client = NewClient();
         var big = new ClientCapabilities("", "", "", [new CommandCapability("big", new string('x', 70 * 1024), [])]);

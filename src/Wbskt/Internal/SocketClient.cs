@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
@@ -25,10 +24,14 @@ internal sealed class SocketClient : IAsyncDisposable
     public Func<WbsktMessage, CancellationToken, Task>? MessageHandler { get; set; }
 
     /// <summary>How long disposing waits for a running handler to finish.</summary>
-    private static readonly TimeSpan HandlerDrainTimeout = TimeSpan.FromSeconds(5);
+    private readonly TimeSpan _handlerDrainTimeout;
 
-    // Set while an app's handler runs on the dispatch task, so disposing from inside one doesn't wait on itself.
-    private static readonly AsyncLocal<bool> InHandler = new();
+    // The client whose handler is running on this flow, so disposing it from inside one doesn't wait on
+    // itself. It also flows into tasks the handler starts; those then dispose without waiting, which is
+    // only a drain skipped.
+    private static readonly AsyncLocal<SocketClient?> HandlerOf = new();
+
+    private int _disposed;
 
     /// <summary>An app's handler threw. The connection stays up and the next message is handed over as usual.</summary>
     public event Action<Exception>? OnHandlerError;
@@ -43,8 +46,9 @@ internal sealed class SocketClient : IAsyncDisposable
     /// <summary>The last connect attempt was refused with 401: the token is no longer accepted.</summary>
     public bool TokenRejected { get; private set; }
 
-    public SocketClient(string baseUrl)
+    public SocketClient(string baseUrl, TimeSpan? handlerDrainTimeout = null)
     {
+        _handlerDrainTimeout = handlerDrainTimeout ?? TimeSpan.FromSeconds(5);
         _baseUrl = baseUrl;
         _dispatch = Task.Run(DispatchLoopAsync);
     }
@@ -225,7 +229,13 @@ internal sealed class SocketClient : IAsyncDisposable
         {
             await foreach (var message in _inbox.Reader.ReadAllAsync(_dispatchCts.Token))
             {
-                InHandler.Value = true;
+                // ReadAllAsync checks the token only when it has to wait, so a backlog would still be handed over after dispose.
+                if (_dispatchCts.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                HandlerOf.Value = this;
                 try
                 {
                     Handlers.Raise(OnMessageReceived, handler => handler(message.Type, message.Payload, message.CommandId), OnHandlerError);
@@ -244,7 +254,7 @@ internal sealed class SocketClient : IAsyncDisposable
                 }
                 finally
                 {
-                    InHandler.Value = false;
+                    HandlerOf.Value = null;
                 }
             }
         }
@@ -271,17 +281,22 @@ internal sealed class SocketClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
         await _cts.CancelAsync();
         await AbortAsync();
         _inbox.Writer.TryComplete();
         await _dispatchCts.CancelAsync();
 
         // A handler that disposes the client must not wait for itself, and one that hangs must not hang disposal.
-        if (!InHandler.Value)
+        if (HandlerOf.Value != this)
         {
             try
             {
-                await _dispatch.WaitAsync(HandlerDrainTimeout);
+                await _dispatch.WaitAsync(_handlerDrainTimeout);
             }
             catch (TimeoutException)
             {
@@ -292,7 +307,7 @@ internal sealed class SocketClient : IAsyncDisposable
         _cts.Dispose();
         if (_dispatch.IsCompleted)
         {
-            // A handler still running may yet read its token or send; leave those to the finalizer.
+            // A handler still running may yet read its token or send, so these are left to the garbage collector.
             _dispatchCts.Dispose();
             _sendLock.Dispose();
         }

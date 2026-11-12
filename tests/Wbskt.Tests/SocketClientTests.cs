@@ -167,43 +167,78 @@ public sealed class SocketClientTests
     }
 
     [Fact]
-    public async Task A_handler_can_dispose_the_client()
+    public async Task A_handler_can_dispose_the_client_and_no_later_message_reaches_it()
     {
         using var server = new LoopbackServer();
         var socket = new SocketClient(server.Url);
+        var handled = new ConcurrentQueue<string>();
         var disposed = new TaskCompletionSource();
-        socket.MessageHandler = async (_, _) =>
+        var gate = new TaskCompletionSource();
+        socket.MessageHandler = async (message, _) =>
         {
-            await socket.DisposeAsync();
-            disposed.TrySetResult();
+            handled.Enqueue(message.Type);
+            if (message.Type == "reboot")
+            {
+                // Hold until the next messages are queued behind this one.
+                await gate.Task;
+                await socket.DisposeAsync();
+                disposed.TrySetResult();
+            }
         };
 
         using var serverSide = await ConnectAsync(server, socket);
         await SendAsync(serverSide, """{"type":"reboot"}""");
+        await SendAsync(serverSide, """{"type":"after0"}""");
+        await SendAsync(serverSide, """{"type":"after1"}""");
+        await Task.Delay(200);
+        gate.SetResult();
 
-        await disposed.Task.WaitAsync(Wait);
+        await disposed.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await Task.Delay(100);
+        handled.Should().Equal("reboot");
     }
 
     [Fact]
-    public async Task Disposing_cancels_a_running_handler_and_does_not_wait_for_ever()
+    public async Task Disposing_stops_handing_over_a_backlog_and_cancels_the_running_handler()
     {
         using var server = new LoopbackServer();
-        var socket = new SocketClient(server.Url);
+        var socket = new SocketClient(server.Url, handlerDrainTimeout: TimeSpan.FromMilliseconds(200));
+        var handled = new ConcurrentQueue<string>();
         var started = new TaskCompletionSource();
         var cancelled = new TaskCompletionSource();
-        socket.MessageHandler = async (_, cancellationToken) =>
+        var release = new TaskCompletionSource();
+        socket.MessageHandler = async (message, cancellationToken) =>
         {
+            handled.Enqueue(message.Type);
             started.TrySetResult();
             cancellationToken.Register(() => cancelled.TrySetResult());
-            await Task.Delay(Timeout.Infinite, CancellationToken.None);
+            await release.Task;
         };
 
         using var serverSide = await ConnectAsync(server, socket);
         await SendAsync(serverSide, """{"type":"slow"}""");
+        await SendAsync(serverSide, """{"type":"queued"}""");
         await started.Task.WaitAsync(Wait);
+        await Task.Delay(100);
 
-        await socket.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await socket.DisposeAsync().AsTask().WaitAsync(Wait);
+        release.SetResult();
+        await Task.Delay(100);
+
         cancelled.Task.IsCompleted.Should().BeTrue();
+        handled.Should().Equal("slow");
+    }
+
+    [Fact]
+    public async Task Disposing_twice_is_harmless()
+    {
+        using var server = new LoopbackServer();
+        var socket = new SocketClient(server.Url);
+
+        await socket.DisposeAsync();
+        var again = async () => await socket.DisposeAsync();
+
+        await again.Should().NotThrowAsync();
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
