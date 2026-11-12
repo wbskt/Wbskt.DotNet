@@ -16,12 +16,15 @@ This is a 0.9 beta (`--prerelease` finds it): the client protocol it speaks may 
 
 await using var wbskt = new WbsktClient("greenhouse-sensor", "your-policy-pin");
 
-wbskt.MessageHandler = async message =>
+wbskt.MessageHandler = async (message, cancellationToken) =>
 {
-    // The payload is a JsonElement: read it, or Deserialize<T>() it.
-    if (message.Type == "led.set" && message.Payload?.GetProperty("on").GetBoolean() is { } on)
+    // The payload is a JsonElement (null when there was none): read it, or Deserialize<T>() it.
+    if (message.Type == "led.set"
+        && message.Payload is { ValueKind: JsonValueKind.Object } payload
+        && payload.TryGetProperty("on", out var on)
+        && on.ValueKind is JsonValueKind.True or JsonValueKind.False)
     {
-        await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["led"] = on });
+        await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["led"] = on.GetBoolean() });
     }
 };
 
@@ -53,17 +56,19 @@ two minutes to drain.
 
 **Handlers.** Messages reach `MessageHandler` one at a time, in order, on the SDK's own task: each
 call is awaited before the next message is handed over, and a slow handler doesn't delay the
-connection's pings. The payload is a `JsonElement`. A handler that throws, before or after an
+connection's pings. Pass the token on to anything slow: it is cancelled when the client is disposed.
+Don't wait inside a handler for a later message; it can't arrive until the handler returns. The payload is a `JsonElement`. A handler that throws, before or after an
 `await`, doesn't drop the connection; the exception is raised on `OnHandlerError`. The
 `OnMessageReceived` event still works for synchronous handlers, but don't give it an `async` lambda:
 that is `async void`, and an exception after its first `await` ends the process. `OnConnected`,
 `OnDisconnected` and `OnSuperseded` are guarded the same way: the client still announces itself and
 reconnects.
 
-**Not connecting?** `OnConnectFailed` is raised with the reason for every failed attempt (a wrong PIN,
-a full policy, approval pending, a revoked client, a wrong URL, TLS), while the client keeps retrying.
-If the saved credentials are rejected and there is no PIN to register again, it is raised with
-`RegistrationRequiredException` and the client stops: start it again with a PIN.
+**Not connecting?** `OnConnectFailed` is raised with the exception for every failed attempt (an
+unreachable URL, TLS, or a refused registration or login, for now told apart only by its message),
+while the client keeps retrying. If the saved credentials are rejected and there is no PIN to register
+again, it is raised with `RegistrationRequiredException` and the client stops for good: dispose it and
+create a new one with a PIN.
 
 **Message size.** A message over 64 KB once serialised throws `ArgumentException` from `SendAsync` or
 `ReportStateAsync`; send a link to anything bigger.

@@ -1,5 +1,3 @@
-using System.Text;
-using System.Text.Json;
 using Wbskt.Internal;
 
 namespace Wbskt;
@@ -31,7 +29,7 @@ public sealed class WbsktClient : IWbsktClient
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
-    public Func<WbsktMessage, Task>? MessageHandler
+    public Func<WbsktMessage, CancellationToken, Task>? MessageHandler
     {
         get => _socket.MessageHandler;
         set => _socket.MessageHandler = value;
@@ -78,7 +76,7 @@ public sealed class WbsktClient : IWbsktClient
 
         // Forward internal events to public surface
         _socket.OnMessageReceived += (type, payload, commandId) => Handlers.Raise(OnMessageReceived, handler => handler(type, payload, commandId), OnHandlerError);
-        _socket.OnHandlerError += error => OnHandlerError?.Invoke(error);
+        _socket.OnHandlerError += error => Handlers.Report(error, OnHandlerError);
         _socket.OnConnected += HandleConnected;
         _socket.OnDisconnected += HandleDisconnect;
     }
@@ -260,14 +258,26 @@ public sealed class WbsktClient : IWbsktClient
         }
     }
 
-        private TimeSpan FailureDelay(Exception error, int failures) =>
+    private TimeSpan FailureDelay(Exception error, int failures) =>
         error is ClientLoginThrottledException { RetryAfter: { } retryAfter }
             ? _reconnect.AfterThrottle(retryAfter)
             : _reconnect.RetryDelay(failures);
 
+    /// <exception cref="ArgumentException">The capabilities are over 64 KB once serialised.</exception>
     public async Task UpdateCapabilitiesAsync(ClientCapabilities capabilities)
     {
+        // Checked before they are kept: they go out first on every connection, so too big would never connect.
+        var previous = _lastCapabilities;
         _lastCapabilities = capabilities;
+        try
+        {
+            ProtocolJson.EnsureWithinLimit(new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities()), nameof(capabilities));
+        }
+        catch (ArgumentException)
+        {
+            _lastCapabilities = previous;
+            throw;
+        }
 
         if (_socket.IsConnected)
         {
@@ -286,20 +296,16 @@ public sealed class WbsktClient : IWbsktClient
             throw new ArgumentException(violation.Message, nameof(type));
         }
 
-        return EnqueueAsync(type, payload);
+        return EnqueueAsync(type, payload, nameof(payload));
     }
 
-    private async Task EnqueueAsync(string type, object payload)
+    private async Task EnqueueAsync(string type, object payload, string paramName)
     {
         var message = new ProtocolMessage(type, payload) { SentAt = DateTimeOffset.UtcNow };
 
         // The gateway closes the connection on a bigger one, and a buffered one would be resent first on
         // every reconnect and never get through.
-        int size = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(message));
-        if (size > ClientProtocol.MaxMessageBytes)
-        {
-            throw new ArgumentException($"The message is {size} bytes; the limit is {ClientProtocol.MaxMessageBytes}.", nameof(payload));
-        }
+        ProtocolJson.EnsureWithinLimit(message, paramName);
 
         if (_outbound.Capacity <= 0)
         {
@@ -366,7 +372,7 @@ public sealed class WbsktClient : IWbsktClient
     public async Task ReportStateAsync(IReadOnlyDictionary<string, object?> patch)
     {
         // Partial update: only the reported variables change; the platform keeps the rest.
-        await EnqueueAsync(MessageTypes.StateReport, patch);
+        await EnqueueAsync(MessageTypes.StateReport, patch, nameof(patch));
     }
 
     private async Task<(Guid RefId, string Secret)> ResolveCredentialsAsync()

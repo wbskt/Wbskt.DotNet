@@ -18,6 +18,28 @@ public sealed class WbsktClientTests
     }
 
     [Fact]
+    public async Task Capabilities_over_64_KB_are_refused_and_the_previous_ones_kept()
+    {
+        await using var client = NewClient();
+        var big = new ClientCapabilities("", "", "", [new CommandCapability("big", new string('x', 70 * 1024), [])]);
+
+        var update = () => client.UpdateCapabilitiesAsync(big);
+
+        await update.Should().ThrowAsync<ArgumentException>().WithParameterName("capabilities");
+        await client.UpdateCapabilitiesAsync(new ClientCapabilities("", "", "", []));
+    }
+
+    [Fact]
+    public async Task A_state_report_over_64_KB_names_its_own_parameter()
+    {
+        await using var client = NewClient();
+
+        var report = () => client.ReportStateAsync(new Dictionary<string, object?> { ["log"] = new string('x', 70 * 1024) });
+
+        await report.Should().ThrowAsync<ArgumentException>().WithParameterName("patch");
+    }
+
+    [Fact]
     public async Task A_message_under_the_limit_is_buffered_while_offline()
     {
         await using var client = NewClient();
