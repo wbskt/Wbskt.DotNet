@@ -6,6 +6,11 @@ namespace Wbskt;
 /// Keeps the client's credentials in a JSON file, so it registers once and signs in with them on
 /// every later start. The default for <see cref="WbsktClient(string, string)"/>.
 /// </summary>
+/// <remarks>
+/// The file is <c>{"clientRefId": ..., "secret": ...}</c>, the protocol's own names and the same file the
+/// Python SDK writes at the same path, so a client moved from one SDK to the other keeps its credentials.
+/// A file from before 0.9.0-beta.2 (<c>RefId</c>, <c>Secret</c>) is still read.
+/// </remarks>
 public sealed class FileClientStorage : IClientStorage
 {
     private readonly string _filePath;
@@ -40,8 +45,17 @@ public sealed class FileClientStorage : IClientStorage
             Directory.CreateDirectory(directory);
         }
 
-        var json = JsonSerializer.Serialize(new { RefId = refId, Secret = secret });
-        await File.WriteAllTextAsync(_filePath, json);
+        var json = JsonSerializer.Serialize(new Dictionary<string, string> { ["clientRefId"] = refId.ToString("D"), ["secret"] = secret });
+
+        // Written beside it and moved over it, readable by this user only, so a crash never leaves half a file.
+        string temporary = _filePath + ".tmp";
+        await File.WriteAllTextAsync(temporary, json);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        File.Move(temporary, _filePath, overwrite: true);
     }
 
     public async Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync()
@@ -55,8 +69,9 @@ public sealed class FileClientStorage : IClientStorage
         {
             var json = await File.ReadAllTextAsync(_filePath);
             using var doc = JsonDocument.Parse(json);
-            var refId = doc.RootElement.GetProperty("RefId").GetGuid();
-            var secret = doc.RootElement.GetProperty("Secret").GetString();
+            var root = doc.RootElement;
+            var refId = (root.TryGetProperty("clientRefId", out var id) ? id : root.GetProperty("RefId")).GetGuid();
+            var secret = (root.TryGetProperty("secret", out var s) ? s : root.GetProperty("Secret")).GetString();
             return (refId, secret);
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or FormatException or InvalidOperationException)

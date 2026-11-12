@@ -20,6 +20,35 @@ public sealed class FileClientStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task The_file_uses_the_protocols_names_as_the_python_sdk_does()
+    {
+        string path = Path.Combine(_dir, "client.json");
+        var refId = Guid.NewGuid();
+
+        await new FileClientStorage(path).SaveCredentialsAsync(refId, "s3cret");
+
+        Assert.Equal($$"""{"clientRefId":"{{refId}}","secret":"s3cret"}""", await File.ReadAllTextAsync(path));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        }
+    }
+
+    [Fact]
+    public async Task A_file_the_python_sdk_or_an_older_version_wrote_is_read()
+    {
+        Directory.CreateDirectory(_dir);
+        var refId = Guid.NewGuid();
+        string python = Path.Combine(_dir, "python.json");
+        string older = Path.Combine(_dir, "older.json");
+        await File.WriteAllTextAsync(python, $$"""{"clientRefId": "{{refId}}", "secret": "from-python"}""");
+        await File.WriteAllTextAsync(older, $$"""{"RefId":"{{refId}}","Secret":"from-0.9.0-beta.1"}""");
+
+        Assert.Equal((refId, "from-python"), await new FileClientStorage(python).LoadCredentialsAsync());
+        Assert.Equal((refId, "from-0.9.0-beta.1"), await new FileClientStorage(older).LoadCredentialsAsync());
+    }
+
+    [Fact]
     public async Task A_corrupt_file_reads_as_no_credentials()
     {
         Directory.CreateDirectory(_dir);
