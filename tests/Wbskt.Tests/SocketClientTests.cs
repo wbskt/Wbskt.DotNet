@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Collections.Concurrent;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Wbskt.Internal;
 
@@ -86,18 +88,18 @@ public sealed class SocketClientTests
     {
         using var server = new LoopbackServer();
         await using var socket = new SocketClient(server.Url);
-        var handled = new List<string>();
-        Exception? seen = null;
-        socket.MessageHandler = async message =>
+        var handled = new ConcurrentQueue<string>();
+        var seen = new TaskCompletionSource<Exception>();
+        socket.MessageHandler = async (message, _) =>
         {
             await Task.Yield();
-            handled.Add($"{message.Type}:{message.Payload?.GetProperty("on").GetBoolean()}");
+            handled.Enqueue($"{message.Type}:{message.Payload?.GetProperty("on").GetBoolean()}");
             if (message.Type == "led.set")
             {
                 throw new InvalidOperationException("app bug");
             }
         };
-        socket.OnHandlerError += error => seen = error;
+        socket.OnHandlerError += error => seen.TrySetResult(error);
 
         using var serverSide = await ConnectAsync(server, socket);
         await SendAsync(serverSide, """{"type":"led.set","payload":{"on":true}}""");
@@ -105,7 +107,7 @@ public sealed class SocketClientTests
 
         await WaitUntilAsync(() => handled.Count == 2);
         handled.Should().Equal("led.set:True", "led.get:False");
-        seen.Should().BeOfType<InvalidOperationException>();
+        (await seen.Task.WaitAsync(Wait)).Should().BeOfType<InvalidOperationException>();
     }
 
     [Fact]
@@ -113,12 +115,12 @@ public sealed class SocketClientTests
     {
         using var server = new LoopbackServer();
         await using var socket = new SocketClient(server.Url);
-        var order = new List<string>();
-        socket.MessageHandler = async message =>
+        var order = new ConcurrentQueue<string>();
+        socket.MessageHandler = async (message, _) =>
         {
-            order.Add($"start {message.Type}");
+            order.Enqueue($"start {message.Type}");
             await Task.Delay(50);
-            order.Add($"end {message.Type}");
+            order.Enqueue($"end {message.Type}");
         };
 
         using var serverSide = await ConnectAsync(server, socket);
@@ -127,6 +129,81 @@ public sealed class SocketClientTests
 
         await WaitUntilAsync(() => order.Count == 4);
         order.Should().Equal("start a", "end a", "start b", "end b");
+    }
+
+    [Fact]
+    public async Task A_handler_that_throws_before_awaiting_is_reported_too()
+    {
+        using var server = new LoopbackServer();
+        await using var socket = new SocketClient(server.Url);
+        var seen = new TaskCompletionSource<Exception>();
+        socket.MessageHandler = (_, _) => throw new InvalidOperationException("app bug");
+        socket.OnHandlerError += error => seen.TrySetResult(error);
+
+        using var serverSide = await ConnectAsync(server, socket);
+        await SendAsync(serverSide, """{"type":"a"}""");
+
+        (await seen.Task.WaitAsync(Wait)).Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task A_payload_that_is_json_null_or_missing_arrives_as_null()
+    {
+        using var server = new LoopbackServer();
+        await using var socket = new SocketClient(server.Url);
+        var payloads = new ConcurrentQueue<JsonElement?>();
+        socket.MessageHandler = (message, _) =>
+        {
+            payloads.Enqueue(message.Payload);
+            return Task.CompletedTask;
+        };
+
+        using var serverSide = await ConnectAsync(server, socket);
+        await SendAsync(serverSide, """{"type":"a","payload":null}""");
+        await SendAsync(serverSide, """{"type":"b"}""");
+
+        await WaitUntilAsync(() => payloads.Count == 2);
+        payloads.Should().AllSatisfy(payload => payload.Should().BeNull());
+    }
+
+    [Fact]
+    public async Task A_handler_can_dispose_the_client()
+    {
+        using var server = new LoopbackServer();
+        var socket = new SocketClient(server.Url);
+        var disposed = new TaskCompletionSource();
+        socket.MessageHandler = async (_, _) =>
+        {
+            await socket.DisposeAsync();
+            disposed.TrySetResult();
+        };
+
+        using var serverSide = await ConnectAsync(server, socket);
+        await SendAsync(serverSide, """{"type":"reboot"}""");
+
+        await disposed.Task.WaitAsync(Wait);
+    }
+
+    [Fact]
+    public async Task Disposing_cancels_a_running_handler_and_does_not_wait_for_ever()
+    {
+        using var server = new LoopbackServer();
+        var socket = new SocketClient(server.Url);
+        var started = new TaskCompletionSource();
+        var cancelled = new TaskCompletionSource();
+        socket.MessageHandler = async (_, cancellationToken) =>
+        {
+            started.TrySetResult();
+            cancellationToken.Register(() => cancelled.TrySetResult());
+            await Task.Delay(Timeout.Infinite, CancellationToken.None);
+        };
+
+        using var serverSide = await ConnectAsync(server, socket);
+        await SendAsync(serverSide, """{"type":"slow"}""");
+        await started.Task.WaitAsync(Wait);
+
+        await socket.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        cancelled.Task.IsCompleted.Should().BeTrue();
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)

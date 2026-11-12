@@ -18,8 +18,17 @@ internal sealed class SocketClient : IAsyncDisposable
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
-    /// <summary>Awaited for each message after <see cref="OnMessageReceived"/>, before the next is handed over.</summary>
-    public Func<WbsktMessage, Task>? MessageHandler { get; set; }
+    /// <summary>
+    /// Awaited for each message after <see cref="OnMessageReceived"/>, before the next is handed over. The
+    /// token is cancelled when the client is disposed.
+    /// </summary>
+    public Func<WbsktMessage, CancellationToken, Task>? MessageHandler { get; set; }
+
+    /// <summary>How long disposing waits for a running handler to finish.</summary>
+    private static readonly TimeSpan HandlerDrainTimeout = TimeSpan.FromSeconds(5);
+
+    // Set while an app's handler runs on the dispatch task, so disposing from inside one doesn't wait on itself.
+    private static readonly AsyncLocal<bool> InHandler = new();
 
     /// <summary>An app's handler threw. The connection stays up and the next message is handed over as usual.</summary>
     public event Action<Exception>? OnHandlerError;
@@ -86,8 +95,7 @@ internal sealed class SocketClient : IAsyncDisposable
             throw new InvalidOperationException("Socket not connected.");
         }
 
-        var json = JsonSerializer.Serialize(message);
-        var bytes = Encoding.UTF8.GetBytes(json);
+        var bytes = ProtocolJson.Serialize(message);
         
         // ClientWebSocket allows one send at a time; pongs, acks and app messages share the socket.
         await _sendLock.WaitAsync();
@@ -176,7 +184,7 @@ internal sealed class SocketClient : IAsyncDisposable
                 return;
             }
 
-            var payload = root.TryGetProperty("payload", out var p) ? (object)p.Clone() : null;
+            JsonElement? payload = root.TryGetProperty("payload", out var p) && p.ValueKind != JsonValueKind.Null ? p.Clone() : null;
             var commandId = root.TryGetProperty("commandId", out var c) && c.ValueKind == JsonValueKind.String
                 ? c.GetString()
                 : null;
@@ -217,18 +225,26 @@ internal sealed class SocketClient : IAsyncDisposable
         {
             await foreach (var message in _inbox.Reader.ReadAllAsync(_dispatchCts.Token))
             {
-                Handlers.Raise(OnMessageReceived, handler => handler(message.Type, message.Payload, message.CommandId), OnHandlerError);
-                if (MessageHandler is { } handler)
+                InHandler.Value = true;
+                try
                 {
-                    // Awaited here, so an exception after the handler's first await is caught too.
-                    try
+                    Handlers.Raise(OnMessageReceived, handler => handler(message.Type, message.Payload, message.CommandId), OnHandlerError);
+                    if (MessageHandler is { } handler)
                     {
-                        await handler(new WbsktMessage(message.Type, message.Payload as JsonElement?, message.CommandId));
+                        // Awaited here, so an exception after the handler's first await is caught too.
+                        try
+                        {
+                            await handler(new WbsktMessage(message.Type, message.Payload, message.CommandId), _dispatchCts.Token);
+                        }
+                        catch (Exception error)
+                        {
+                            Handlers.Report(error, OnHandlerError);
+                        }
                     }
-                    catch (Exception error)
-                    {
-                        Handlers.Report(error, OnHandlerError);
-                    }
+                }
+                finally
+                {
+                    InHandler.Value = false;
                 }
             }
         }
@@ -259,12 +275,28 @@ internal sealed class SocketClient : IAsyncDisposable
         await AbortAsync();
         _inbox.Writer.TryComplete();
         await _dispatchCts.CancelAsync();
-        await _dispatch;
+
+        // A handler that disposes the client must not wait for itself, and one that hangs must not hang disposal.
+        if (!InHandler.Value)
+        {
+            try
+            {
+                await _dispatch.WaitAsync(HandlerDrainTimeout);
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
         _webSocket.Dispose();
         _cts.Dispose();
-        _dispatchCts.Dispose();
-        _sendLock.Dispose();
+        if (_dispatch.IsCompleted)
+        {
+            // A handler still running may yet read its token or send; leave those to the finalizer.
+            _dispatchCts.Dispose();
+            _sendLock.Dispose();
+        }
     }
 }
 
-internal sealed record InboundMessage(string Type, object? Payload, string? CommandId);
+internal sealed record InboundMessage(string Type, JsonElement? Payload, string? CommandId);

@@ -13,21 +13,28 @@ public interface IWbsktClient : IAsyncDisposable
     /// <c>async</c> lambda on <see cref="OnMessageReceived"/>, which is <c>async void</c>: an exception
     /// after its first <c>await</c> ends the process.
     /// </summary>
-    Func<WbsktMessage, Task>? MessageHandler { get; set; }
+    /// <remarks>
+    /// The token is cancelled when the client is disposed; pass it on to anything slow. A handler must not
+    /// wait for a later message, which can't arrive until it returns. Disposing the client from a handler
+    /// is fine, and disposing elsewhere waits up to five seconds for a running handler.
+    /// </remarks>
+    Func<WbsktMessage, CancellationToken, Task>? MessageHandler { get; set; }
 
     /// <summary>
     /// A handler of this client's events threw (<see cref="OnMessageReceived"/>, <see cref="OnConnected"/>,
-    /// <see cref="OnDisconnected"/>, <see cref="OnConnectFailed"/> and the client's <c>OnSuperseded</c>). The connection stays up, and
+    /// <see cref="MessageHandler"/>, <see cref="OnDisconnected"/>, <see cref="OnConnectFailed"/> and the client's <c>OnSuperseded</c>). The connection stays up, and
     /// the client still reconnects.
     /// </summary>
     event Action<Exception>? OnHandlerError;
     event Action? OnConnected;
 
     /// <summary>
-    /// A connection attempt failed, with why: a wrong PIN or a full policy, approval still pending, a
-    /// revoked client, an unreachable URL, a TLS error. Raised for every attempt; the client keeps retrying
-    /// on its schedule, except after a <see cref="RegistrationRequiredException"/> (the saved credentials
-    /// were rejected and there is no PIN), when it stops: start a new client with a PIN.
+    /// A connection attempt failed, with the exception that stopped it: an unreachable URL or a TLS error,
+    /// or a refused registration or login (a wrong PIN, a full policy, approval pending, a disabled
+    /// client), for now told apart only by its message. Raised for every attempt; the client keeps
+    /// retrying on its schedule, except after a <see cref="RegistrationRequiredException"/> (the saved
+    /// credentials were rejected and there is no PIN), when it stops for good: dispose it and create a new
+    /// client with a PIN.
     /// </summary>
     event Action<Exception>? OnConnectFailed;
     event Action? OnDisconnected;
