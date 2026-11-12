@@ -44,7 +44,7 @@ public sealed class WbsktClient : IWbsktClient
     /// <summary>
     /// A client named <paramref name="clientName"/> on the hosted service, enrolling with
     /// <paramref name="policyPin"/> the first time and keeping its credentials in a file
-    /// (<see cref="FileClientStorage.ForClient"/>) for every start after that.
+    /// (<see cref="FileClientStorage.ForClient(string)"/>) for every start after that.
     /// </summary>
     public WbsktClient(string clientName, string policyPin)
         : this(new ClientConfig(WbsktDefaults.ApiUrl, WbsktDefaults.SocketUrl, clientName, policyPin), FileClientStorage.ForClient(clientName))
