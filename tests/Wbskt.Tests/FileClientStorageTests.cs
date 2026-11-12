@@ -63,8 +63,8 @@ public sealed class FileClientStorageTests : IDisposable
     {
         string a = $"sensor-{Guid.NewGuid():N}";
         string b = $"sensor/{Guid.NewGuid():N}";
-        var first = FileClientStorage.ForClient(a);
-        var second = FileClientStorage.ForClient(b);
+        var first = FileClientStorage.ForClient(a, _dir);
+        var second = FileClientStorage.ForClient(b, _dir);
         var refId = Guid.NewGuid();
 
         try
@@ -79,14 +79,6 @@ public sealed class FileClientStorageTests : IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_dir))
-        {
-            Directory.Delete(_dir, recursive: true);
-        }
-    }
-
     [Fact]
     public void A_client_name_maps_to_the_file_name_the_Python_SDK_uses()
     {
@@ -97,22 +89,77 @@ public sealed class FileClientStorageTests : IDisposable
     }
 
     [Fact]
-    public async Task A_temporary_file_left_by_an_interrupted_save_does_not_block_the_next()
+    public async Task Saves_leave_no_temporary_file_behind()
     {
-        string path = Path.Combine(Path.GetTempPath(), $"wbskt-{Guid.NewGuid():N}.json");
+        string path = Path.Combine(_dir, "client.json");
         var storage = new FileClientStorage(path);
         var refId = Guid.NewGuid();
 
-        try
+        await Task.WhenAll(storage.SaveCredentialsAsync(refId, "one"), storage.SaveCredentialsAsync(refId, "two"));
+
+        Assert.Equal(refId, (await storage.LoadCredentialsAsync()).RefId);
+        Assert.Equal(["client.json"], Directory.GetFiles(_dir).Select(Path.GetFileName));
+    }
+
+    [Fact]
+    public async Task A_file_an_older_version_named_differently_is_moved_and_made_private()
+    {
+        if (OperatingSystem.IsWindows())
         {
-            await File.WriteAllTextAsync(path + ".tmp", "partial");
-            await storage.SaveCredentialsAsync(refId, "secret");
-            Assert.Equal((refId, "secret"), await storage.LoadCredentialsAsync());
-            Assert.False(File.Exists(path + ".tmp"));
+            return;
         }
-        finally
+
+        string folder = Path.Combine(_dir, "wbskt");
+        Directory.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "pi:kitchen.json");
+        var refId = Guid.NewGuid();
+        await File.WriteAllTextAsync(legacy, $$"""{"RefId":"{{refId}}","Secret":"old"}""");
+        File.SetUnixFileMode(legacy, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+
+        var storage = FileClientStorage.ForClient("pi:kitchen", _dir);
+
+        Assert.Equal((refId, "old"), await storage.LoadCredentialsAsync());
+        string moved = Path.Combine(folder, "pi_kitchen.json");
+        Assert.False(File.Exists(legacy));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(moved));
+    }
+
+    [Fact]
+    public async Task A_file_under_the_new_name_wins_over_an_older_one()
+    {
+        if (OperatingSystem.IsWindows())
         {
-            await storage.ClearCredentialsAsync();
+            return;
+        }
+
+        string folder = Path.Combine(_dir, "wbskt");
+        Directory.CreateDirectory(folder);
+        var refId = Guid.NewGuid();
+        await File.WriteAllTextAsync(Path.Combine(folder, "pi:kitchen.json"), $$"""{"RefId":"{{Guid.NewGuid()}}","Secret":"old"}""");
+        await File.WriteAllTextAsync(Path.Combine(folder, "pi_kitchen.json"), $$"""{"clientRefId":"{{refId}}","secret":"new"}""");
+
+        Assert.Equal((refId, "new"), await FileClientStorage.ForClient("pi:kitchen", _dir).LoadCredentialsAsync());
+        Assert.True(File.Exists(Path.Combine(folder, "pi:kitchen.json")));
+    }
+
+    [Fact]
+    public async Task Constructing_storage_touches_no_file()
+    {
+        string folder = Path.Combine(_dir, "wbskt");
+        Directory.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "pi:kitchen.json");
+        await File.WriteAllTextAsync(legacy, "{}");
+
+        FileClientStorage.ForClient("pi:kitchen", _dir);
+
+        Assert.True(File.Exists(legacy));
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_dir))
+        {
+            Directory.Delete(_dir, recursive: true);
         }
     }
 }
