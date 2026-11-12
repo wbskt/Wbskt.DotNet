@@ -33,7 +33,8 @@ public interface IWbsktClient : IAsyncDisposable
     /// Sends an application message. The types "capabilities", "state.report" and anything
     /// prefixed "sys." are reserved for the platform protocol — use
     /// <see cref="UpdateCapabilitiesAsync"/> / <see cref="ReportStateAsync"/> instead; they throw <see cref="ArgumentException"/>.
-    /// Each message carries the time it was sent. While offline, messages wait in memory
+    /// A message over 64 KB once serialised throws <see cref="ArgumentException"/> too, rather than
+    /// ending the connection. Each message carries the time it was sent. While offline, messages wait in memory
     /// (up to <see cref="ClientConfig.OfflineBufferSize"/>) and go out in order on reconnect.
     /// </summary>
     Task SendAsync(string type, object payload);

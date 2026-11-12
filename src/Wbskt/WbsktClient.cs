@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using Wbskt.Internal;
 
 namespace Wbskt;
@@ -255,7 +257,8 @@ public sealed class WbsktClient : IWbsktClient
     }
 
     /// <exception cref="ArgumentException">
-    /// The type is empty, too long, or reserved for the protocol (<c>sys.*</c>, <c>capabilities</c>, <c>state.report</c>).
+    /// The type is empty, too long, or reserved for the protocol (<c>sys.*</c>, <c>capabilities</c>,
+    /// <c>state.report</c>), or the message is over 64 KB once serialised.
     /// </exception>
     public Task SendAsync(string type, object payload)
     {
@@ -270,6 +273,14 @@ public sealed class WbsktClient : IWbsktClient
     private async Task EnqueueAsync(string type, object payload)
     {
         var message = new ProtocolMessage(type, payload) { SentAt = DateTimeOffset.UtcNow };
+
+        // The gateway closes the connection on a bigger one, and a buffered one would be resent first on
+        // every reconnect and never get through.
+        int size = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(message));
+        if (size > ClientProtocol.MaxMessageBytes)
+        {
+            throw new ArgumentException($"The message is {size} bytes; the limit is {ClientProtocol.MaxMessageBytes}.", nameof(payload));
+        }
 
         if (_outbound.Capacity <= 0)
         {
@@ -332,6 +343,7 @@ public sealed class WbsktClient : IWbsktClient
         }
     }
 
+    /// <exception cref="ArgumentException">The report is over 64 KB once serialised.</exception>
     public async Task ReportStateAsync(IReadOnlyDictionary<string, object?> patch)
     {
         // Partial update: only the reported variables change; the platform keeps the rest.
