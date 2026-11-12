@@ -18,6 +18,9 @@ internal sealed class SocketClient : IAsyncDisposable
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
+    /// <summary>Awaited for each message after <see cref="OnMessageReceived"/>, before the next is handed over.</summary>
+    public Func<WbsktMessage, Task>? MessageHandler { get; set; }
+
     /// <summary>An app's handler threw. The connection stays up and the next message is handed over as usual.</summary>
     public event Action<Exception>? OnHandlerError;
     public event Action? OnConnected;
@@ -215,6 +218,18 @@ internal sealed class SocketClient : IAsyncDisposable
             await foreach (var message in _inbox.Reader.ReadAllAsync(_dispatchCts.Token))
             {
                 Handlers.Raise(OnMessageReceived, handler => handler(message.Type, message.Payload, message.CommandId), OnHandlerError);
+                if (MessageHandler is { } handler)
+                {
+                    // Awaited here, so an exception after the handler's first await is caught too.
+                    try
+                    {
+                        await handler(new WbsktMessage(message.Type, message.Payload as JsonElement?, message.CommandId));
+                    }
+                    catch (Exception error)
+                    {
+                        Handlers.Report(error, OnHandlerError);
+                    }
+                }
             }
         }
         catch (OperationCanceledException)

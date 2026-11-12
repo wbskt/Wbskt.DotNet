@@ -16,8 +16,14 @@ This is a 0.9 beta (`--prerelease` finds it): the client protocol it speaks may 
 
 await using var wbskt = new WbsktClient("greenhouse-sensor", "your-policy-pin");
 
-wbskt.OnMessageReceived += (type, payload, commandId) =>
-    Console.WriteLine($"{type}: {payload}");
+wbskt.MessageHandler = async message =>
+{
+    // The payload is a JsonElement: read it, or Deserialize<T>() it.
+    if (message.Type == "led.set" && message.Payload?.GetProperty("on").GetBoolean() is { } on)
+    {
+        await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["led"] = on });
+    }
+};
 
 await wbskt.StartAsync();
 
@@ -45,9 +51,13 @@ in the console's send panel. Delivery acks and expired-command refusals are sent
 are paced at 8 a second after a burst of 50, under the gateway's limit, so a full buffer takes about
 two minutes to drain.
 
-**Handlers.** Messages reach `OnMessageReceived` one at a time, in order, on the SDK's own task. A
-handler that throws doesn't drop the connection; the exception is raised on `OnHandlerError`. The same
-holds for `OnConnected`, `OnDisconnected` and `OnSuperseded`: the client still announces itself and
+**Handlers.** Messages reach `MessageHandler` one at a time, in order, on the SDK's own task: each
+call is awaited before the next message is handed over, and a slow handler doesn't delay the
+connection's pings. The payload is a `JsonElement`. A handler that throws, before or after an
+`await`, doesn't drop the connection; the exception is raised on `OnHandlerError`. The
+`OnMessageReceived` event still works for synchronous handlers, but don't give it an `async` lambda:
+that is `async void`, and an exception after its first `await` ends the process. `OnConnected`,
+`OnDisconnected` and `OnSuperseded` are guarded the same way: the client still announces itself and
 reconnects.
 
 The wire protocol every Wbskt SDK implements is documented in

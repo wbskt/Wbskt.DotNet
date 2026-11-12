@@ -7,6 +7,15 @@ public interface IWbsktClient : IAsyncDisposable
     event Action<string, object?, string?>? OnMessageReceived;
 
     /// <summary>
+    /// The async way to handle messages: awaited for each one, after <see cref="OnMessageReceived"/>, before
+    /// the next is handed over, so messages are still handled one at a time and in order. An exception,
+    /// before or after an <c>await</c>, goes to <see cref="OnHandlerError"/>. Use this rather than an
+    /// <c>async</c> lambda on <see cref="OnMessageReceived"/>, which is <c>async void</c>: an exception
+    /// after its first <c>await</c> ends the process.
+    /// </summary>
+    Func<WbsktMessage, Task>? MessageHandler { get; set; }
+
+    /// <summary>
     /// A handler of this client's events threw (<see cref="OnMessageReceived"/>, <see cref="OnConnected"/>,
     /// <see cref="OnDisconnected"/> and the client's <c>OnSuperseded</c>). The connection stays up, and
     /// the client still reconnects.

@@ -29,6 +29,12 @@ public sealed class WbsktClient : IWbsktClient
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
+    public Func<WbsktMessage, Task>? MessageHandler
+    {
+        get => _socket.MessageHandler;
+        set => _socket.MessageHandler = value;
+    }
+
     public event Action<Exception>? OnHandlerError;
     public event Action? OnConnected;
     public event Action? OnDisconnected;

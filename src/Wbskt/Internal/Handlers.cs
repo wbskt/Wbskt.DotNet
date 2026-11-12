@@ -28,7 +28,7 @@ internal static class Handlers
         }
     }
 
-    private static void Report(Exception error, Action<Exception>? onError)
+    public static void Report(Exception error, Action<Exception>? onError)
     {
         foreach (var handler in onError?.GetInvocationList() ?? [])
         {
