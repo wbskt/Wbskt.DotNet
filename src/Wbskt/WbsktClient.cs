@@ -21,6 +21,9 @@ public sealed class WbsktClient : IWbsktClient
     private bool _shouldReconnect = true;
     // Set once this connection's capabilities are out; nothing else is sent before them.
     private volatile bool _announced;
+
+    // Counts connections, so an announcement still finishing for an old one cannot mark a newer one announced.
+    private int _connection;
     private Guid? _resolvedRefId;
     private string? _resolvedSecret;
     private ClientCapabilities? _lastCapabilities;
@@ -124,6 +127,7 @@ public sealed class WbsktClient : IWbsktClient
 
             // 3. Connect to real-time gateway
             _announced = false;
+            Interlocked.Increment(ref _connection);
             try
             {
                 await _socket.ConnectAsync(token);
@@ -151,6 +155,7 @@ public sealed class WbsktClient : IWbsktClient
 
     private async Task AnnounceCapabilitiesAsync()
     {
+        var connection = Volatile.Read(ref _connection);
         try
         {
             // Capabilities describe the connection, so they go out first and are never buffered.
@@ -159,6 +164,11 @@ public sealed class WbsktClient : IWbsktClient
         catch (Exception)
         {
             // Connection may have dropped mid-handshake; the reconnect monitor will retry and re-announce.
+            return;
+        }
+
+        if (connection != Volatile.Read(ref _connection) || !_socket.IsConnected)
+        {
             return;
         }
 
