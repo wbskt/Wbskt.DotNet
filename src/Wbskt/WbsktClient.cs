@@ -26,6 +26,7 @@ public sealed class WbsktClient : IWbsktClient
     private Guid? _resolvedRefId;
     private string? _resolvedSecret;
     private ClientCapabilities? _lastCapabilities;
+    private int _disposed;
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
@@ -167,7 +168,7 @@ public sealed class WbsktClient : IWbsktClient
         try
         {
             // Capabilities describe the connection, so they go out first and are never buffered.
-            await _socket.SendAsync(new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities()));
+            await _socket.SendAsync(new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities(_lastCapabilities)));
         }
         catch (Exception)
         {
@@ -179,10 +180,9 @@ public sealed class WbsktClient : IWbsktClient
         await FlushOutboundAsync();
     }
 
-    private ClientCapabilities BuildEffectiveCapabilities()
+    private static ClientCapabilities BuildEffectiveCapabilities(ClientCapabilities? app)
     {
         // Auto-detected SDK metadata; app-supplied values win when explicitly set.
-        var app = _lastCapabilities;
         var agent = app is { Agent.Length: > 0 } ? app.Agent : SdkInfo.AgentName;
         var version = app is { Version.Length: > 0 } ? app.Version : SdkInfo.Version;
         var os = app is { OS.Length: > 0 } ? app.OS : SdkInfo.Platform;
@@ -267,21 +267,13 @@ public sealed class WbsktClient : IWbsktClient
     public async Task UpdateCapabilitiesAsync(ClientCapabilities capabilities)
     {
         // Checked before they are kept: they go out first on every connection, so too big would never connect.
-        var previous = _lastCapabilities;
+        var message = new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities(capabilities));
+        ProtocolJson.EnsureWithinLimit(message, nameof(capabilities));
         _lastCapabilities = capabilities;
-        try
-        {
-            ProtocolJson.EnsureWithinLimit(new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities()), nameof(capabilities));
-        }
-        catch (ArgumentException)
-        {
-            _lastCapabilities = previous;
-            throw;
-        }
 
         if (_socket.IsConnected)
         {
-            await _socket.SendAsync(new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities()));
+            await _socket.SendAsync(message);
         }
     }
 
@@ -397,6 +389,11 @@ public sealed class WbsktClient : IWbsktClient
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return;
+        }
+
         _shouldReconnect = false;
         await _cts.CancelAsync();
         _auth.Dispose();
