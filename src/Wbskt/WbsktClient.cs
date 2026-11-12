@@ -143,10 +143,10 @@ public sealed class WbsktClient : IWbsktClient
 
     private void HandleConnected()
     {
-        OnConnected?.Invoke();
-
-        // Always advertise SDK metadata (merged with any app-declared commands) on every successful connection
+        // Always advertise SDK metadata (merged with any app-declared commands) on every successful
+        // connection, before the app hears of it, so a handler that throws cannot hold it back.
         _ = AnnounceCapabilitiesAsync();
+        Handlers.Raise(OnConnected, OnHandlerError);
     }
 
     private async Task AnnounceCapabilitiesAsync()
@@ -179,7 +179,7 @@ public sealed class WbsktClient : IWbsktClient
     private void HandleDisconnect()
     {
         _announced = false;
-        OnDisconnected?.Invoke();
+        Handlers.Raise(OnDisconnected, OnHandlerError);
     }
 
     private async Task MonitorReconnectionAsync(int failures, TimeSpan? retryIn)
@@ -210,7 +210,7 @@ public sealed class WbsktClient : IWbsktClient
                 }
                 else if (close == ServerClose.Superseded)
                 {
-                    OnSuperseded?.Invoke();
+                    Handlers.Raise(OnSuperseded, OnHandlerError);
                 }
 
                 await Task.Delay(_reconnect.FirstDelay(close), _cts.Token);
