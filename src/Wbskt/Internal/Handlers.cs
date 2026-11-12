@@ -23,14 +23,22 @@ internal static class Handlers
             }
             catch (Exception error)
             {
-                try
-                {
-                    onError?.Invoke(error);
-                }
-                catch
-                {
-                    // An error handler that throws is ignored too.
-                }
+                Report(error, onError);
+            }
+        }
+    }
+
+    private static void Report(Exception error, Action<Exception>? onError)
+    {
+        foreach (var handler in onError?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                ((Action<Exception>)handler)(error);
+            }
+            catch
+            {
+                // An error handler that throws is ignored too.
             }
         }
     }
