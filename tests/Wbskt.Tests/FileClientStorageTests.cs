@@ -86,4 +86,33 @@ public sealed class FileClientStorageTests : IDisposable
             Directory.Delete(_dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void A_client_name_maps_to_the_file_name_the_Python_SDK_uses()
+    {
+        Assert.Equal("pi_kitchen__1_", FileClientStorage.SafeFileName("pi/kitchen:\"1\""));
+        Assert.Equal("a_b_c_d_e_f_g", FileClientStorage.SafeFileName("a*b?c|d<e>f\\g"));
+        Assert.Equal("tab_here", FileClientStorage.SafeFileName("tab\there"));
+        Assert.Equal("greenhouse-sensor", FileClientStorage.SafeFileName("greenhouse-sensor"));
+    }
+
+    [Fact]
+    public async Task A_temporary_file_left_by_an_interrupted_save_does_not_block_the_next()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"wbskt-{Guid.NewGuid():N}.json");
+        var storage = new FileClientStorage(path);
+        var refId = Guid.NewGuid();
+
+        try
+        {
+            await File.WriteAllTextAsync(path + ".tmp", "partial");
+            await storage.SaveCredentialsAsync(refId, "secret");
+            Assert.Equal((refId, "secret"), await storage.LoadCredentialsAsync());
+            Assert.False(File.Exists(path + ".tmp"));
+        }
+        finally
+        {
+            await storage.ClearCredentialsAsync();
+        }
+    }
 }

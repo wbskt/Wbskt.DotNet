@@ -33,9 +33,24 @@ public sealed class FileClientStorage : IClientStorage
             root = Directory.GetCurrentDirectory();
         }
 
-        string safeName = string.Concat(clientName.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-        return new FileClientStorage(Path.Combine(root, "wbskt", $"{safeName}.json"));
+        string directory = Path.Combine(root, "wbskt");
+        string path = Path.Combine(directory, $"{SafeFileName(clientName)}.json");
+
+        // Before 0.9.0-beta.2 only the platform's invalid characters were replaced; carry such a file over.
+        string legacy = Path.Combine(directory, $"{string.Concat(clientName.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c))}.json");
+        if (legacy != path && File.Exists(legacy) && !File.Exists(path))
+        {
+            File.Move(legacy, path);
+        }
+
+        return new FileClientStorage(path);
     }
+
+    /// <summary>
+    /// The same replacement on every platform, matching the Python SDK, so both find one file for a name.
+    /// </summary>
+    internal static string SafeFileName(string clientName) =>
+        string.Concat(clientName.Select(c => c < 0x20 || "\\/:*?\"<>|".Contains(c) ? '_' : c));
 
     public async Task SaveCredentialsAsync(Guid refId, string secret)
     {
@@ -47,12 +62,20 @@ public sealed class FileClientStorage : IClientStorage
 
         var json = JsonSerializer.Serialize(new Dictionary<string, string> { ["clientRefId"] = refId.ToString("D"), ["secret"] = secret });
 
-        // Written beside it and moved over it, readable by this user only, so a crash never leaves half a file.
+        // Written beside it and moved over it, so a crash never leaves half a file. Created readable by
+        // this user only, so the secret is never on disk with wider permissions.
         string temporary = _filePath + ".tmp";
-        await File.WriteAllTextAsync(temporary, json);
+        File.Delete(temporary);
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
         if (!OperatingSystem.IsWindows())
         {
-            File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        await using (var stream = new FileStream(temporary, options))
+        {
+            await stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json));
+            stream.Flush(flushToDisk: true);
         }
 
         File.Move(temporary, _filePath, overwrite: true);
@@ -82,10 +105,8 @@ public sealed class FileClientStorage : IClientStorage
 
     public Task ClearCredentialsAsync()
     {
-        if (File.Exists(_filePath))
-        {
-            File.Delete(_filePath);
-        }
+        File.Delete(_filePath);
+        File.Delete(_filePath + ".tmp");
 
         return Task.CompletedTask;
     }
