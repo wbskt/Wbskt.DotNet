@@ -81,6 +81,54 @@ public sealed class SocketClientTests
         order.Should().Equal("connected", "led.set");
     }
 
+    [Fact]
+    public async Task An_async_handler_that_throws_after_awaiting_is_reported_and_the_next_message_still_arrives()
+    {
+        using var server = new LoopbackServer();
+        await using var socket = new SocketClient(server.Url);
+        var handled = new List<string>();
+        Exception? seen = null;
+        socket.MessageHandler = async message =>
+        {
+            await Task.Yield();
+            handled.Add($"{message.Type}:{message.Payload?.GetProperty("on").GetBoolean()}");
+            if (message.Type == "led.set")
+            {
+                throw new InvalidOperationException("app bug");
+            }
+        };
+        socket.OnHandlerError += error => seen = error;
+
+        using var serverSide = await ConnectAsync(server, socket);
+        await SendAsync(serverSide, """{"type":"led.set","payload":{"on":true}}""");
+        await SendAsync(serverSide, """{"type":"led.get","payload":{"on":false}}""");
+
+        await WaitUntilAsync(() => handled.Count == 2);
+        handled.Should().Equal("led.set:True", "led.get:False");
+        seen.Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task An_async_handler_finishes_one_message_before_the_next_starts()
+    {
+        using var server = new LoopbackServer();
+        await using var socket = new SocketClient(server.Url);
+        var order = new List<string>();
+        socket.MessageHandler = async message =>
+        {
+            order.Add($"start {message.Type}");
+            await Task.Delay(50);
+            order.Add($"end {message.Type}");
+        };
+
+        using var serverSide = await ConnectAsync(server, socket);
+        await SendAsync(serverSide, """{"type":"a"}""");
+        await SendAsync(serverSide, """{"type":"b"}""");
+
+        await WaitUntilAsync(() => order.Count == 4);
+        order.Should().Equal("start a", "end a", "start b", "end b");
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(Wait);
