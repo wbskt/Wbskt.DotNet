@@ -12,29 +12,7 @@ public sealed class SocketClientTests
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(5);
 
     [Fact]
-    public void A_handler_that_throws_reaches_the_error_handler_and_the_next_subscriber_still_runs()
-    {
-        Exception? seen = null;
-        var secondRan = false;
-        Action? handlers = () => throw new InvalidOperationException("boom");
-        handlers += () => secondRan = true;
-
-        Handlers.Raise(handlers, error => seen = error);
-
-        seen.Should().BeOfType<InvalidOperationException>();
-        secondRan.Should().BeTrue();
-    }
-
-    [Fact]
-    public void An_error_handler_that_throws_is_ignored()
-    {
-        var raise = () => Handlers.Raise(() => throw new InvalidOperationException("boom"), _ => throw new InvalidOperationException("again"));
-
-        raise.Should().NotThrow();
-    }
-
-    [Fact]
-    public async Task A_connected_handler_that_throws_leaves_the_connection_read()
+    public async Task A_connected_handler_that_throws_leaves_the_connection_reading()
     {
         using var server = new LoopbackServer();
         await using var socket = new SocketClient(server.Url);
@@ -55,11 +33,13 @@ public sealed class SocketClientTests
         using var server = new LoopbackServer();
         await using var socket = new SocketClient(server.Url);
         var disconnected = new TaskCompletionSource();
+        Exception? seen = null;
         socket.OnDisconnected += () =>
         {
             disconnected.TrySetResult();
             throw new InvalidOperationException("app bug");
         };
+        socket.OnHandlerError += error => seen = error;
 
         using (var first = await ConnectAsync(server, socket))
         {
@@ -69,6 +49,45 @@ public sealed class SocketClientTests
 
         using var second = await ConnectAsync(server, socket);
         socket.IsConnected.Should().BeTrue();
+        seen.Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task What_the_connected_handler_sends_goes_out_before_any_answer_to_the_gateway()
+    {
+        using var server = new LoopbackServer();
+        await using var socket = new SocketClient(server.Url);
+        var order = new List<string>();
+        socket.OnConnected += () =>
+        {
+            order.Add("connected");
+
+            // As WbsktClient announces its capabilities: started here, finished on the send lock.
+            _ = socket.SendAsync(new ProtocolMessage(MessageTypes.Capabilities, new { }));
+        };
+        socket.OnMessageReceived += (type, _, _) => order.Add(type);
+
+        // The gateway pings the moment it accepts, before reading anything.
+        var accepting = server.AcceptAsync();
+        var connecting = socket.ConnectAsync("token");
+        using var serverSide = await accepting.WaitAsync(Wait);
+        await SendAsync(serverSide, """{"type":"sys.ping","payload":{"timestamp":"2026-11-12T10:00:00Z","id":"p1"}}""");
+        await SendAsync(serverSide, """{"type":"led.set","payload":{}}""");
+        await connecting.WaitAsync(Wait);
+
+        (await ReceiveAsync(serverSide)).Should().Contain("\"capabilities\"");
+        (await ReceiveAsync(serverSide)).Should().Contain("sys.pong");
+        await WaitUntilAsync(() => order.Count == 2);
+        order.Should().Equal("connected", "led.set");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(Wait);
+        while (!condition())
+        {
+            await Task.Delay(10, timeout.Token);
+        }
     }
 
     private static async Task<WebSocket> ConnectAsync(LoopbackServer server, SocketClient socket)

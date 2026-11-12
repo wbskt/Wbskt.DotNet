@@ -19,11 +19,10 @@ public sealed class WbsktClient : IWbsktClient
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
     
     private bool _shouldReconnect = true;
-    // Set once this connection's capabilities are out; nothing else is sent before them.
-    private volatile bool _announced;
-
-    // Counts connections, so an announcement still finishing for an old one cannot mark a newer one announced.
+    // Counts connections. The one whose capabilities are out is recorded by its number, so an announcement
+    // still finishing for an old connection cannot mark a newer one announced; nothing else is sent before them.
     private int _connection;
+    private int _announcedConnection = -1;
     private Guid? _resolvedRefId;
     private string? _resolvedSecret;
     private ClientCapabilities? _lastCapabilities;
@@ -68,7 +67,7 @@ public sealed class WbsktClient : IWbsktClient
         _tokens = new ClientTokenCache(() => _auth.LoginAsync(_resolvedRefId!.Value, _resolvedSecret!));
 
         // Forward internal events to public surface
-        _socket.OnMessageReceived += (type, payload, commandId) => OnMessageReceived?.Invoke(type, payload, commandId);
+        _socket.OnMessageReceived += (type, payload, commandId) => Handlers.Raise(OnMessageReceived, handler => handler(type, payload, commandId), OnHandlerError);
         _socket.OnHandlerError += error => OnHandlerError?.Invoke(error);
         _socket.OnConnected += HandleConnected;
         _socket.OnDisconnected += HandleDisconnect;
@@ -126,7 +125,6 @@ public sealed class WbsktClient : IWbsktClient
             }
 
             // 3. Connect to real-time gateway
-            _announced = false;
             Interlocked.Increment(ref _connection);
             try
             {
@@ -167,12 +165,7 @@ public sealed class WbsktClient : IWbsktClient
             return;
         }
 
-        if (connection != Volatile.Read(ref _connection) || !_socket.IsConnected)
-        {
-            return;
-        }
-
-        _announced = true;
+        Volatile.Write(ref _announcedConnection, connection);
         await FlushOutboundAsync();
     }
 
@@ -186,9 +179,11 @@ public sealed class WbsktClient : IWbsktClient
         return new ClientCapabilities(agent, version, os, app?.Capabilities ?? [], app?.System, app?.FirmwareVersion);
     }
 
+    private bool Announced => Volatile.Read(ref _announcedConnection) == Volatile.Read(ref _connection);
+
     private void HandleDisconnect()
     {
-        _announced = false;
+        Volatile.Write(ref _announcedConnection, -1);
         Handlers.Raise(OnDisconnected, OnHandlerError);
     }
 
@@ -272,7 +267,7 @@ public sealed class WbsktClient : IWbsktClient
 
         if (_outbound.Capacity <= 0)
         {
-            if (!_announced)
+            if (!Announced)
             {
                 throw new InvalidOperationException("Socket not connected.");
             }
@@ -298,7 +293,7 @@ public sealed class WbsktClient : IWbsktClient
 
     private async Task FlushOutboundAsync()
     {
-        while (_announced && _socket.IsConnected && _outbound.Count > 0)
+        while (Announced && _socket.IsConnected && _outbound.Count > 0)
         {
             // A flush already running sends this message too, so the caller doesn't wait behind a paced backlog.
             if (!await _flushLock.WaitAsync(0))
@@ -308,7 +303,7 @@ public sealed class WbsktClient : IWbsktClient
 
             try
             {
-                while (_announced && _socket.IsConnected && _outbound.TryPeek(out var next))
+                while (Announced && _socket.IsConnected && _outbound.TryPeek(out var next))
                 {
                     try
                     {
