@@ -20,21 +20,12 @@ public record CommandCapability(
     List<PropertySchema> Parameters
 );
 
-/// <param name="System">The platform features the client takes, such as <see cref="SystemCapabilities.Ota"/>. Absent means none.</param>
 /// <param name="FirmwareVersion">The version of the code the client runs: its firmware on a microcontroller, the application otherwise. Not the SDK's own version, which is <paramref name="Version"/>.</param>
 public record ClientCapabilities(
     string Agent,
     string Version,
     string OS,
     List<CommandCapability> Capabilities,
-    List<string>? System = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? FirmwareVersion = null
 );
-
-/// <summary>The names a client may list under <c>system</c> in its capabilities.</summary>
-public static class SystemCapabilities
-{
-    /// <summary>Takes <c>sys.ota.update</c>.</summary>
-    public const string Ota = "ota";
-}
