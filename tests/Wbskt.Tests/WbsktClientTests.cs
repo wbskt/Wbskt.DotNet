@@ -1,4 +1,7 @@
+using System.Net;
+using System.Net.Sockets;
 using FluentAssertions;
+using Wbskt.Internal;
 
 namespace Wbskt.Tests;
 
@@ -85,6 +88,33 @@ public sealed class WbsktClientTests
         await client.StartAsync();
 
         (await reported.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task A_throttled_registration_carries_the_retry_after()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        using var api = new HttpListener();
+        api.Prefixes.Add($"http://127.0.0.1:{port}/");
+        api.Start();
+        _ = Task.Run(async () =>
+        {
+            var context = await api.GetContextAsync();
+            context.Response.StatusCode = 429;
+            context.Response.Headers["Retry-After"] = "7";
+            context.Response.Close();
+        });
+        await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), new MemoryStorage());
+        var failed = new TaskCompletionSource<Exception>();
+        client.OnConnectFailed += error => failed.TrySetResult(error);
+
+        await client.StartAsync();
+
+        var error = await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        error.Should().BeOfType<ClientAuthThrottledException>().Which.RetryAfter.Should().Be(TimeSpan.FromSeconds(7));
     }
 
     private static WbsktClient NewClient(string? pin = "pin") =>

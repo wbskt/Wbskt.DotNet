@@ -20,6 +20,11 @@ internal sealed class AuthClient : IDisposable
     {
         var response = await _httpClient.PostAsJsonAsync("api/v1/client-registrations/initiate", new ClientRegistrationRequest(pin, _config.ClientName));
 
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            throw new ClientAuthThrottledException("registration", RetryAfter(response));
+        }
+
         if (!response.IsSuccessStatusCode)
         {
             throw new SecurityException("Failed to register client using PIN.");
@@ -35,7 +40,7 @@ internal sealed class AuthClient : IDisposable
 
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
-            throw new ClientLoginThrottledException(RetryAfter(response));
+            throw new ClientAuthThrottledException("login", RetryAfter(response));
         }
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && await ErrorCodeAsync(response) == ClientErrorCodes.Unauthorized)
