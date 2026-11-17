@@ -1,0 +1,25 @@
+# Weekly update proposals: the pinned workflow actions (the SHA moves with the version in its
+# comment) and the NuGet packages in Directory.Packages.props. Minor and patch bumps come grouped;
+# majors come on their own, since those are the ones to read.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    groups:
+      nuget:
+        update-types: [minor, patch]
