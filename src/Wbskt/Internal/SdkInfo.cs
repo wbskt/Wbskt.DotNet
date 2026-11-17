@@ -7,7 +7,7 @@ namespace Wbskt.Internal;
 // so every client shows its SDK and platform without any app code.
 internal static class SdkInfo
 {
-    public const string AgentName = "csharp-sdk";
+    public const string AgentName = "wbskt-dotnet";
 
     public static readonly string Version = ResolveVersion();
 

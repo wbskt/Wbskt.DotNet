@@ -22,7 +22,7 @@ public interface IWbsktClient : IAsyncDisposable
 
     /// <summary>
     /// A handler of this client's events threw (<see cref="OnMessageReceived"/>, <see cref="OnConnected"/>,
-    /// <see cref="MessageHandler"/>, <see cref="OnDisconnected"/>, <see cref="OnConnectFailed"/> and the client's <c>OnSuperseded</c>). The connection stays up, and
+    /// <see cref="MessageHandler"/>, <see cref="OnDisconnected"/>, <see cref="OnConnectFailed"/> and <see cref="OnSuperseded"/>). The connection stays up, and
     /// the client still reconnects.
     /// </summary>
     event Action<Exception>? OnHandlerError;
@@ -38,6 +38,12 @@ public interface IWbsktClient : IAsyncDisposable
     /// </summary>
     event Action<Exception>? OnConnectFailed;
     event Action? OnDisconnected;
+
+    /// <summary>
+    /// A newer connection with these credentials replaced this one. Now and then that is this client
+    /// reconnecting; raised again and again, another client is probably using the same credentials.
+    /// </summary>
+    event Action? OnSuperseded;
 
     /// <summary>Messages waiting in the offline buffer.</summary>
     int PendingMessageCount { get; }

@@ -42,10 +42,6 @@ public sealed class WbsktClient : IWbsktClient
     public event Action? OnConnected;
     public event Action? OnDisconnected;
 
-    /// <summary>
-    /// A newer connection with these credentials replaced this one. Now and then that is this client
-    /// reconnecting; raised again and again, another client is probably using the same credentials.
-    /// </summary>
     public event Action? OnSuperseded;
 
     public int PendingMessageCount => _outbound.Count;
