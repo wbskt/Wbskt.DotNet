@@ -41,26 +41,6 @@ internal static class ClientMessageRules
 
         return null;
     }
-
-    /// <summary>
-    /// The rule a platform command (<see cref="MessageTypes.IsPlatformCommand"/>) breaks, or null when
-    /// it may be sent. Only the platform's own senders call this; whatever a user or a workflow sends
-    /// goes through <see cref="Check"/>, which refuses every reserved type.
-    /// </summary>
-    public static ClientMessageViolation? CheckPlatformCommand(string? messageType, string? payload)
-    {
-        if (messageType is null || !MessageTypes.IsPlatformCommand(messageType))
-        {
-            return new ClientMessageViolation(ClientMessageRule.TypeReserved, $"Message type '{messageType}' is not a platform command.");
-        }
-
-        if (payload is { Length: > MaxPayloadChars })
-        {
-            return new ClientMessageViolation(ClientMessageRule.PayloadSize, $"Message payload is limited to {MaxPayloadChars} characters.");
-        }
-
-        return null;
-    }
 }
 
 internal enum ClientMessageRule

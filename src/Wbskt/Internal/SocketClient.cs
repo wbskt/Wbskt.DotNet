@@ -183,7 +183,10 @@ internal sealed class SocketClient : IAsyncDisposable
                 return;
             }
 
-            if (MessageTypes.IsReserved(type) && !MessageTypes.IsPlatformCommand(type))
+            // Platform messages are handled above or not at all. That includes sys.ota.update: this SDK
+            // never lists "ota" in its capabilities, so a server sends it none, and the app is not
+            // handed a command it has no way to answer.
+            if (MessageTypes.IsReserved(type))
             {
                 return;
             }

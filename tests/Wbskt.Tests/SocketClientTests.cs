@@ -84,6 +84,22 @@ public sealed class SocketClientTests
     }
 
     [Fact]
+    public async Task An_ota_update_is_never_handed_to_the_app()
+    {
+        using var server = new LoopbackServer();
+        await using var socket = new SocketClient(server.Url);
+        var handed = new ConcurrentQueue<string>();
+        socket.OnMessageReceived += (type, _, _) => handed.Enqueue(type);
+
+        using var serverSide = await ConnectAsync(server, socket);
+        await SendAsync(serverSide, """{"type":"sys.ota.update","commandId":"c1","payload":{"url":"https://fw.example/fw.bin","sha256":"00"}}""");
+        await SendAsync(serverSide, """{"type":"led.set","payload":{}}""");
+
+        await WaitUntilAsync(() => !handed.IsEmpty);
+        handed.Should().Equal("led.set");
+    }
+
+    [Fact]
     public async Task An_async_handler_that_throws_after_awaiting_is_reported_and_the_next_message_still_arrives()
     {
         using var server = new LoopbackServer();
