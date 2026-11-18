@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <SdkPackageVersion>0.9.0-beta.1</SdkPackageVersion>
+    <SdkPackageVersion>0.9.0-beta.2</SdkPackageVersion>
     <Authors>wbskt</Authors>
     <Company>wbskt</Company>
     <Copyright>Copyright (c) 2026 wbskt</Copyright>
