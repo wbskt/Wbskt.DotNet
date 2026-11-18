@@ -77,4 +77,16 @@ public sealed class ReconnectPolicyTests
 
         Assert.InRange(delay, TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(20) + ReconnectPolicy.Base);
     }
+
+    [Fact]
+    public void A_retry_after_already_past_or_days_away_stays_a_wait_task_delay_takes()
+    {
+        var policy = new ReconnectPolicy(new Random(4));
+
+        var past = policy.AfterThrottle(TimeSpan.FromMinutes(-5));
+        var far = policy.AfterThrottle(TimeSpan.FromDays(400));
+
+        Assert.InRange(past, TimeSpan.Zero, ReconnectPolicy.Base);
+        Assert.InRange(far, ReconnectPolicy.MaxRetryAfter, ReconnectPolicy.MaxRetryAfter + ReconnectPolicy.Base);
+    }
 }
