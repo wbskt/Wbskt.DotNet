@@ -226,7 +226,8 @@ public sealed class SocketClientTests
         await Task.Delay(200);
         gate.SetResult();
 
-        await disposed.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        // Disposing waits up to CloseTimeout for an answer to its close, which this server never reads.
+        await disposed.Task.WaitAsync(SocketClient.CloseTimeout + TimeSpan.FromSeconds(1));
         await Task.Delay(100);
         handled.Should().Equal("reboot");
     }
