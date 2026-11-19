@@ -18,7 +18,15 @@ public sealed class WbsktClient : IWbsktClient
     /// <summary>How often a connected client checks whether its socket is still open.</summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
     
-    private bool _shouldReconnect = true;
+    private volatile bool _shouldReconnect = true;
+    // The reconnect monitor of the current start, and what stops it; replaced by each start after a stop.
+    private Task _monitor = Task.CompletedTask;
+    private CancellationTokenSource _run = new();
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+
+    // Set on the monitor's flow, so a handler it raises (OnConnectFailed, OnSuperseded, OnConnected) can
+    // stop or dispose the client without waiting for the monitor that is running it.
+    private static readonly AsyncLocal<WbsktClient?> MonitorOf = new();
     // Counts connections. The one whose capabilities are out is recorded by its number, so an announcement
     // still finishing for an old connection cannot mark a newer one announced; nothing else is sent before them.
     private int _connection;
@@ -47,6 +55,8 @@ public sealed class WbsktClient : IWbsktClient
     public event Action? OnSuperseded;
 
     public int PendingMessageCount => _outbound.Count;
+
+    public bool IsConnected => _socket.IsConnected && Announced;
 
     /// <summary>
     /// A client named <paramref name="clientName"/> on the hosted service, enrolling with
@@ -88,13 +98,22 @@ public sealed class WbsktClient : IWbsktClient
     /// </summary>
     public async Task StartAsync()
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+
         // A second call while started would start a second reconnect loop racing the first.
         if (Interlocked.CompareExchange(ref _started, 1, 0) == 1)
         {
             return;
         }
 
+        if (_run.IsCancellationRequested)
+        {
+            _run.Dispose();
+            _run = new CancellationTokenSource();
+        }
+
         _shouldReconnect = true;
+        var run = _run.Token;
         var failures = 0;
         TimeSpan? retryIn = null;
         try
@@ -113,7 +132,41 @@ public sealed class WbsktClient : IWbsktClient
             retryIn = FailureDelay(ex, failures++);
         }
 
-        _ = Task.Run(() => MonitorReconnectionAsync(failures, retryIn), _cts.Token);
+        // Stopped or disposed while the first attempt ran: close what it may have opened, start nothing.
+        if (run.IsCancellationRequested)
+        {
+            await _socket.CloseAsync(SocketClient.CloseTimeout);
+            return;
+        }
+
+        _monitor = Task.Run(() => MonitorReconnectionAsync(failures, retryIn, run), CancellationToken.None);
+    }
+
+    public async Task StopAsync()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+        await StopCoreAsync();
+    }
+
+    private async Task StopCoreAsync()
+    {
+        await _lifecycle.WaitAsync();
+        try
+        {
+            _shouldReconnect = false;
+            await _run.CancelAsync();
+            if (MonitorOf.Value != this)
+            {
+                await _monitor;
+            }
+
+            await _socket.CloseAsync(SocketClient.CloseTimeout);
+            Volatile.Write(ref _started, 0);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
     }
 
     private async Task ConnectInternalAsync()
@@ -195,19 +248,32 @@ public sealed class WbsktClient : IWbsktClient
         Handlers.Raise(OnDisconnected, OnHandlerError);
     }
 
-    private async Task MonitorReconnectionAsync(int failures, TimeSpan? retryIn)
+    private async Task MonitorReconnectionAsync(int failures, TimeSpan? retryIn, CancellationToken run)
+    {
+        MonitorOf.Value = this;
+        try
+        {
+            await MonitorReconnectionCoreAsync(failures, retryIn, run);
+        }
+        catch (OperationCanceledException) when (run.IsCancellationRequested)
+        {
+            // Stopped or disposed: the normal end.
+        }
+    }
+
+    private async Task MonitorReconnectionCoreAsync(int failures, TimeSpan? retryIn, CancellationToken run)
     {
         if (retryIn is { } firstWait)
         {
-            await Task.Delay(firstWait, _cts.Token);
+            await Task.Delay(firstWait, run);
         }
 
-        while (!_cts.Token.IsCancellationRequested)
+        while (!run.IsCancellationRequested)
         {
             if (!_shouldReconnect || _socket.IsConnected)
             {
                 failures = 0;
-                await Task.Delay(PollInterval, _cts.Token);
+                await Task.Delay(PollInterval, run);
                 continue;
             }
 
@@ -226,7 +292,7 @@ public sealed class WbsktClient : IWbsktClient
                     Handlers.Raise(OnSuperseded, OnHandlerError);
                 }
 
-                await Task.Delay(_reconnect.FirstDelay(close), _cts.Token);
+                await Task.Delay(_reconnect.FirstDelay(close), run);
                 if (_socket.IsConnected)
                 {
                     continue;
@@ -237,6 +303,12 @@ public sealed class WbsktClient : IWbsktClient
             {
                 await ConnectInternalAsync();
                 failures = 0;
+
+                // A stop that came while this attempt was connecting closes what it opened.
+                if (run.IsCancellationRequested)
+                {
+                    return;
+                }
             }
             catch (Exception ex) when (IsFinal(ex))
             {
@@ -248,7 +320,7 @@ public sealed class WbsktClient : IWbsktClient
             catch (Exception ex)
             {
                 RaiseConnectFailed(ex);
-                await Task.Delay(FailureDelay(ex, failures++), _cts.Token);
+                await Task.Delay(FailureDelay(ex, failures++), run);
             }
         }
     }
@@ -272,6 +344,8 @@ public sealed class WbsktClient : IWbsktClient
     /// <exception cref="ArgumentException">The capabilities are over 64 KB once serialised.</exception>
     public async Task UpdateCapabilitiesAsync(ClientCapabilities capabilities)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+
         // Checked before they are kept: they go out first on every connection, so too big would never connect.
         var frame = ProtocolJson.Frame(new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities(capabilities)), nameof(capabilities));
         _lastCapabilities = capabilities;
@@ -288,6 +362,8 @@ public sealed class WbsktClient : IWbsktClient
     /// </exception>
     public Task SendAsync(string type, object payload)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+
         if (ClientMessageRules.Check(type, null) is { } violation)
         {
             throw new ArgumentException(violation.Message, nameof(type));
@@ -367,6 +443,8 @@ public sealed class WbsktClient : IWbsktClient
     /// <exception cref="ArgumentException">The report is over 64 KB once serialised.</exception>
     public async Task ReportStateAsync(IReadOnlyDictionary<string, object?> patch)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
+
         // Partial update: only the reported variables change; the platform keeps the rest.
         await EnqueueAsync(MessageTypes.StateReport, patch, nameof(patch));
     }
@@ -409,11 +487,14 @@ public sealed class WbsktClient : IWbsktClient
             return;
         }
 
-        _shouldReconnect = false;
+        // Stopped first, so the gateway sees a normal close and no reconnect races the disposal.
+        await StopCoreAsync();
         await _cts.CancelAsync();
         _auth.Dispose();
         await _socket.DisposeAsync();
         _cts.Dispose();
+        _run.Dispose();
         _flushLock.Dispose();
+        _lifecycle.Dispose();
     }
 }
