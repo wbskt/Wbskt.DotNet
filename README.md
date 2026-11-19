@@ -117,10 +117,13 @@ the `StatusCode`, the server's `Code` and its message, for example
 `RetryAfter`. An unreachable URL or a TLS error arrives as the `HttpRequestException` or
 `WebSocketException` .NET raised. With no saved credentials and no PIN it is raised with
 `RegistrationRequiredException`, and the client stops for good: dispose it and create a new one with a PIN.
+A wrong PIN (`POLICY_NOT_FOUND`), an empty one (`REGISTRATION_PIN_REQUIRED`) or a name the platform
+can't store (`CLIENT_NAME_INVALID`) also stops it, since no retry can fix them: `StartAsync` throws the
+`WbsktConnectException` (its `IsFinal` is `true`). Create a new client with the right PIN or name.
 
 | `Code` | Why, and what to do |
 |---|---|
-| `POLICY_NOT_FOUND` (404) | The PIN matches no policy. Check it in the console (Policies). |
+| `POLICY_NOT_FOUND` (404) | The PIN matches no policy. The client stops; check the PIN in the console (Policies). |
 | `POLICY_DISABLED` (403) | The policy is turned off. Turn it on; the client retries. |
 | `POLICY_LIMIT_REACHED` (400), `PLAN_CLIENT_LIMIT_REACHED` (409) | The policy or the plan is full. Remove a client you no longer use. |
 | `CLIENT_NOT_REGISTERED` (401) | Waiting for approval, or revoked or rejected. Approve it in the console; the client retries. |
@@ -153,6 +156,10 @@ registers again; remove the earlier client (`ClientRefId`) in the console.
 
 **Message size.** A message over 64 KB once serialised throws `ArgumentException` from `SendAsync` or
 `ReportStateAsync`; send a link to anything bigger.
+
+**NaN and infinity.** JSON has neither, so a payload holding `double.NaN` or an infinity throws
+`ArgumentException` from `SendAsync` or `ReportStateAsync` and nothing is sent or queued. A DHT22 that
+failed to read returns NaN: leave the field out when the sensor fails, as every Wbskt SDK does.
 
 The wire protocol every Wbskt SDK implements is documented in
 [Docs/Client.Protocol.md](https://github.com/wbskt/Wbskt/blob/master/Docs/Client.Protocol.md), with the

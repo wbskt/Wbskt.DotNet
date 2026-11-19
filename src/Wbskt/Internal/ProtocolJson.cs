@@ -23,10 +23,23 @@ internal static class ProtocolJson
     /// The message as the bytes that will be sent, serialised now: a payload the app changes later (a reused
     /// dictionary) can't change what was queued, nor grow past the limit after it was checked.
     /// </summary>
-    /// <exception cref="ArgumentException">The message is over <see cref="ClientProtocol.MaxMessageBytes"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// The message is over <see cref="ClientProtocol.MaxMessageBytes"/>, or holds NaN or infinity, which JSON
+    /// can't carry (protocol §4.1: refused, never sent as null).
+    /// </exception>
     public static OutboundFrame Frame(ProtocolMessage message, string paramName)
     {
-        var bytes = Serialize(message);
+        byte[] bytes;
+        try
+        {
+            bytes = Serialize(message);
+        }
+        catch (ArgumentException ex)
+        {
+            // System.Text.Json refuses NaN and infinity this way; name the caller's parameter and say why.
+            throw new ArgumentException($"The message can't be sent as JSON: {ex.Message} Leave out a reading that failed.", paramName, ex);
+        }
+
         if (bytes.Length > ClientProtocol.MaxMessageBytes)
         {
             throw new ArgumentException($"The message is {bytes.Length} bytes; the limit is {ClientProtocol.MaxMessageBytes}.", paramName);

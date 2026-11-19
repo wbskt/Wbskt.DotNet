@@ -1,4 +1,5 @@
 using System.Net;
+using Wbskt.Internal;
 
 namespace Wbskt;
 
@@ -13,9 +14,8 @@ public enum ConnectStep
 /// The server refused a registration or a login, with why: the HTTP status, the server's error
 /// <see cref="Code"/> (<c>POLICY_NOT_FOUND</c>, <c>POLICY_DISABLED</c>, <c>POLICY_LIMIT_REACHED</c>,
 /// <c>PLAN_CLIENT_LIMIT_REACHED</c>, <c>CLIENT_NOT_REGISTERED</c>, ...) and its message. Raised on
-/// <see cref="IWbsktClient.OnConnectFailed"/>; the client keeps retrying unless it is a
-/// <see cref="CredentialsRejectedException"/>. A network or TLS failure arrives as the exception
-/// .NET raised for it instead.
+/// <see cref="IWbsktClient.OnConnectFailed"/>; the client keeps retrying unless it <see cref="IsFinal"/>.
+/// A network or TLS failure arrives as the exception .NET raised for it instead.
 /// </summary>
 public class WbsktConnectException(ConnectStep step, HttpStatusCode status, string? code, string? detail, TimeSpan? retryAfter = null)
     : Exception(Describe(step, status, code, detail))
@@ -32,6 +32,13 @@ public class WbsktConnectException(ConnectStep step, HttpStatusCode status, stri
 
     /// <summary>A 429: the client waits <see cref="RetryAfter"/>, or backs off, before the next attempt.</summary>
     public bool IsThrottled => StatusCode == HttpStatusCode.TooManyRequests;
+
+    /// <summary>
+    /// No retry can fix it, so the client stops: a registration refused for a wrong or missing PIN
+    /// (<c>POLICY_NOT_FOUND</c>, <c>REGISTRATION_PIN_REQUIRED</c>) or a name the platform can't store
+    /// (<c>CLIENT_NAME_INVALID</c>), or a <see cref="CredentialsRejectedException"/>.
+    /// </summary>
+    public virtual bool IsFinal => Step == ConnectStep.Registration && Code is not null && ClientErrorCodes.FinalRegistration.Contains(Code);
 
     private static string Describe(ConnectStep step, HttpStatusCode status, string? code, string? detail)
     {

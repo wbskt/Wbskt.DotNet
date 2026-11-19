@@ -105,8 +105,9 @@ public sealed class WbsktClient : IWbsktClient
     /// <summary>
     /// Makes the first connection attempt and returns once it has finished, connected or not. A
     /// failed attempt is raised on <see cref="OnConnectFailed"/> and retried in the background; only
-    /// <see cref="RegistrationRequiredException"/>, <see cref="CredentialsRejectedException"/> and
-    /// <see cref="CredentialsNotSavedException"/> are thrown, because no retry can fix them.
+    /// <see cref="RegistrationRequiredException"/>, <see cref="CredentialsNotSavedException"/> and a
+    /// <see cref="WbsktConnectException"/> that <see cref="WbsktConnectException.IsFinal"/> (a wrong PIN or
+    /// name, or a <see cref="CredentialsRejectedException"/>) are thrown, because no retry can fix them.
     /// </summary>
     public async Task StartAsync()
     {
@@ -367,7 +368,8 @@ public sealed class WbsktClient : IWbsktClient
             }
             catch (Exception ex) when (IsFinal(ex))
             {
-                // No credentials and no PIN, credentials refused for good, or new ones not saved: no retry can fix them.
+                // No credentials and no PIN, a wrong PIN or name, credentials refused for good, or new ones not
+                // saved: no retry can fix them.
                 RaiseConnectFailed(ex);
                 Volatile.Write(ref _started, 0);
                 return;
@@ -381,7 +383,7 @@ public sealed class WbsktClient : IWbsktClient
     }
 
     private static bool IsFinal(Exception error) =>
-        error is RegistrationRequiredException or CredentialsRejectedException or CredentialsNotSavedException;
+        error is RegistrationRequiredException or CredentialsNotSavedException or WbsktConnectException { IsFinal: true };
 
     private void RaiseConnectFailed(Exception error)
     {
