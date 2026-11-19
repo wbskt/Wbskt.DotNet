@@ -234,12 +234,65 @@ public sealed class WbsktClientTests
         refusal.Message.Should().Be("Registration answered 404 POLICY_NOT_FOUND: Invalid registration PIN.");
     }
 
+    [Fact]
+    public async Task Credentials_that_cannot_be_saved_stop_the_client_instead_of_registering_again()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        using var api = new HttpListener();
+        api.Prefixes.Add($"http://127.0.0.1:{port}/");
+        api.Start();
+        var refId = Guid.NewGuid();
+        var paths = new List<string>();
+        _ = Task.Run(async () =>
+        {
+            while (api.IsListening)
+            {
+                var context = await api.GetContextAsync();
+                lock (paths)
+                {
+                    paths.Add(context.Request.Url!.AbsolutePath);
+                }
+
+                context.Response.ContentType = "application/json";
+                await context.Response.OutputStream.WriteAsync(System.Text.Encoding.UTF8.GetBytes($"{{\"clientRefId\":\"{refId}\",\"secret\":\"s\"}}"));
+                context.Response.Close();
+            }
+        });
+        await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), new ReadOnlyStorage());
+        Exception? raised = null;
+        client.OnConnectFailed += error => raised = error;
+
+        var start = () => client.StartAsync();
+
+        var thrown = (await start.Should().ThrowAsync<CredentialsNotSavedException>()).Which;
+        thrown.ClientRefId.Should().Be(refId);
+        thrown.InnerException.Should().BeOfType<UnauthorizedAccessException>();
+        raised.Should().BeOfType<CredentialsNotSavedException>();
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        lock (paths)
+        {
+            paths.Should().Equal("/api/v1/client-registrations/initiate");
+        }
+    }
+
     private static WbsktClient NewClient(string? pin = "pin") =>
         new(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", pin), new MemoryStorage());
 
     private sealed class MemoryStorage : IClientStorage
     {
         public Task SaveCredentialsAsync(Guid refId, string secret) => Task.CompletedTask;
+
+        public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult<(Guid?, string?)>((null, null));
+
+        public Task ClearCredentialsAsync() => Task.CompletedTask;
+    }
+
+    private sealed class ReadOnlyStorage : IClientStorage
+    {
+        public Task SaveCredentialsAsync(Guid refId, string secret) => throw new UnauthorizedAccessException("Access to the path '/data/wbskt/test.json' is denied.");
 
         public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult<(Guid?, string?)>((null, null));
 
