@@ -12,4 +12,17 @@ public record ClientConfig(
     string ClientName,    
     string? PolicyPin = null,
     int OfflineBufferSize = 1000
-);
+)
+{
+    /// <summary>
+    /// The commands the client takes, announced on every connection so the console's send panel offers them.
+    /// <see cref="IWbsktClient.UpdateCapabilitiesAsync"/> replaces them while the client runs.
+    /// </summary>
+    public IReadOnlyList<CommandCapability> Commands { get; init; } = [];
+
+    /// <summary>
+    /// The version of the code the client runs (its firmware, or the application), shown in the console.
+    /// Not the SDK's own version, which the client reports by itself.
+    /// </summary>
+    public string? FirmwareVersion { get; init; }
+}

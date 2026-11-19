@@ -29,10 +29,11 @@ var config = new ClientConfig(
     Env("WBSKT_API_URL"),
     Env("WBSKT_SOCKET_URL"),
     Env("WBSKT_CLIENT_NAME"),
-    Env("WBSKT_POLICY_PIN") is { Length: > 0 } pin ? pin : null);
-
-var webJson = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-var commands = JsonSerializer.Deserialize<List<CommandCapability>>(Env("WBSKT_COMMANDS") is { Length: > 0 } c ? c : "[]", webJson) ?? [];
+    Env("WBSKT_POLICY_PIN") is { Length: > 0 } pin ? pin : null)
+{
+    Commands = JsonSerializer.Deserialize<List<CommandCapability>>(
+        Env("WBSKT_COMMANDS") is { Length: > 0 } c ? c : "[]", new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [],
+};
 
 await using var client = new WbsktClient(config, new FileClientStorage(Env("WBSKT_STORAGE")));
 client.OnConnected += () => Emit("connected");
@@ -48,7 +49,6 @@ client.OnMessageReceived += (type, payload, commandId) =>
 };
 client.OnHandlerError += error => Emit("handler-error", new() { ["reason"] = error.Message });
 
-await client.UpdateCapabilitiesAsync(new ClientCapabilities("", "", "", commands));
 try
 {
     await client.StartAsync();
