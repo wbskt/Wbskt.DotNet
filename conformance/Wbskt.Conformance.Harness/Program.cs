@@ -59,7 +59,7 @@ catch (Exception ex) when (ex is RegistrationRequiredException or CredentialsRej
     Emit("failed", new() { ["reason"] = ex.Message });
 }
 
-Emit("started");
+Emit("started", new() { ["closeCodes"] = true });
 
 while (await Console.In.ReadLineAsync() is { } line)
 {
