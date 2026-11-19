@@ -389,6 +389,17 @@ public sealed class WbsktClientTests
         build.Should().Throw<ArgumentException>().WithMessage("*ClientName*");
     }
 
+    [Fact]
+    public async Task A_name_is_counted_trimmed_as_the_server_counts_it()
+    {
+        // 99 characters with a newline and a space after them, as read from a file: 101 untrimmed.
+        var name = new string('x', 99) + "\n ";
+
+        await using var client = new WbsktClient(new ClientConfig("http://api", "ws://ws", name), new FakeWbskt.SavedStorage(Guid.NewGuid(), "secret"));
+
+        client.Should().NotBeNull();
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);

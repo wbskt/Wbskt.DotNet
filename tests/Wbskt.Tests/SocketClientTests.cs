@@ -70,6 +70,48 @@ public sealed class SocketClientTests
         socket.IsConnected.Should().BeFalse();
     }
 
+#else
+    // net8.0's ClientWebSocket can't time out a Ping, so the link is watched by TCP keep-alive on the socket the
+    // handler opens. A dead link can't be faked on loopback (the kernel answers the probes), so this checks that
+    // the socket every connection goes through carries the timings that notice one within a minute.
+    [Fact]
+    public async Task The_socket_under_a_connection_probes_an_idle_link()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            var liveness = new Liveness(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(21));
+
+            await using var stream = (NetworkStream)await LivenessInvoker.ConnectAsync(new DnsEndPoint("127.0.0.1", port), liveness, CancellationToken.None);
+            var client = stream.Socket;
+
+            ((int)client.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive)!).Should().NotBe(0);
+            client.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime).Should().Be(20);
+            client.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval).Should().Be(7);
+            client.GetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount).Should().Be(LivenessInvoker.KeepAliveProbes);
+            if (OperatingSystem.IsLinux())
+            {
+                var userTimeout = new byte[sizeof(int)];
+                client.GetRawSocketOption(LivenessInvoker.IpProtoTcp, LivenessInvoker.TcpUserTimeout, userTimeout);
+                BitConverter.ToInt32(userTimeout).Should().Be(41_000);
+            }
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public void Each_liveness_shares_one_handler()
+    {
+        var liveness = new Liveness(TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(20));
+
+        LivenessInvoker.Get(liveness).Should().BeSameAs(LivenessInvoker.Get(liveness with { }));
+    }
+
 #endif
     [Fact]
     public async Task What_the_connected_handler_sends_goes_out_before_any_answer_to_the_gateway()
