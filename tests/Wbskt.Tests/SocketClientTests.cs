@@ -54,6 +54,23 @@ public sealed class SocketClientTests
         seen.Should().BeOfType<InvalidOperationException>();
     }
 
+#if NET9_0_OR_GREATER
+    [Fact]
+    public async Task A_link_that_stops_answering_pings_is_dropped()
+    {
+        using var server = new LoopbackServer();
+        await using var socket = new SocketClient(server.Url, liveness: new Liveness(TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(300)));
+        var disconnected = new TaskCompletionSource();
+        socket.OnDisconnected += () => disconnected.TrySetResult();
+
+        // The server side never reads, so no Pong ever goes back: a link that died without a FIN.
+        using var serverSide = await ConnectAsync(server, socket);
+
+        await disconnected.Task.WaitAsync(Wait);
+        socket.IsConnected.Should().BeFalse();
+    }
+
+#endif
     [Fact]
     public async Task What_the_connected_handler_sends_goes_out_before_any_answer_to_the_gateway()
     {

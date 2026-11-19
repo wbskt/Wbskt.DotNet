@@ -46,9 +46,12 @@ internal sealed class SocketClient : IAsyncDisposable
     /// <summary>The last connect attempt was refused with 401: the token is no longer accepted.</summary>
     public bool TokenRejected { get; private set; }
 
-    public SocketClient(string baseUrl, TimeSpan? handlerDrainTimeout = null)
+    private readonly Liveness _liveness;
+
+    public SocketClient(string baseUrl, TimeSpan? handlerDrainTimeout = null, Liveness? liveness = null)
     {
         _handlerDrainTimeout = handlerDrainTimeout ?? TimeSpan.FromSeconds(5);
+        _liveness = liveness ?? Liveness.Default;
         _baseUrl = baseUrl;
         _dispatch = Task.Run(DispatchLoopAsync);
     }
@@ -77,9 +80,21 @@ internal sealed class SocketClient : IAsyncDisposable
         _webSocket.Options.SetRequestHeader("Authorization", $"Bearer {token}");
         _webSocket.Options.AddSubProtocol(WebSocketBinding.Subprotocol);
         _webSocket.Options.CollectHttpResponseDetails = true;
+        _webSocket.Options.KeepAliveInterval = _liveness.Interval;
+#if NET9_0_OR_GREATER
+        // Real Pings: a Pong that doesn't come back within the timeout aborts the connection, so a link
+        // that died without a FIN (Wi-Fi roaming, an expired NAT mapping) is noticed in under a minute.
+        _webSocket.Options.KeepAliveTimeout = _liveness.Timeout;
+#endif
         try
         {
+#if NET9_0_OR_GREATER
             await _webSocket.ConnectAsync(uri, _cts.Token);
+#else
+            // net8.0 can't time out a Ping, so TCP itself probes an idle link, and on Linux gives up on
+            // data that goes unacknowledged, within the same bound.
+            await _webSocket.ConnectAsync(uri, LivenessInvoker.Get(_liveness), _cts.Token);
+#endif
         }
         catch (WebSocketException)
         {
