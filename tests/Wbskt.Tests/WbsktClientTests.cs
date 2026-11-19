@@ -268,6 +268,27 @@ public sealed class WbsktClientTests
         await client.DisposeAsync();
     }
 
+    [Theory]
+    [InlineData("", "http://api", "ws://ws", 10, "ClientName")]
+    [InlineData("sensor", "api.example.com", "ws://ws", 10, "BaseApiUrl")]
+    [InlineData("sensor", "ws://api", "ws://ws", 10, "BaseApiUrl")]
+    [InlineData("sensor", "http://api", "https://ws", 10, "BaseSocketUrl")]
+    [InlineData("sensor", "http://api", "ws://ws", -1, "OfflineBufferSize")]
+    public void A_configuration_that_can_never_connect_is_refused_when_the_client_is_built(string name, string api, string socket, int buffer, string field)
+    {
+        var build = () => new WbsktClient(new ClientConfig(api, socket, name, "pin", buffer), new FakeWbskt.SavedStorage(Guid.NewGuid(), "secret"));
+
+        build.Should().Throw<ArgumentException>().WithMessage($"*{field}*");
+    }
+
+    [Fact]
+    public void A_name_over_the_platforms_limit_is_refused()
+    {
+        var build = () => new WbsktClient(new ClientConfig("http://api", "ws://ws", new string('x', 101)), new FakeWbskt.SavedStorage(Guid.NewGuid(), "secret"));
+
+        build.Should().Throw<ArgumentException>().WithMessage("*ClientName*");
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);

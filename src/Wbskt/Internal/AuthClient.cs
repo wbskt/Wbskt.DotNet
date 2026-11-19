@@ -12,7 +12,9 @@ internal sealed class AuthClient : IDisposable
     public AuthClient(ClientConfig config)
     {
         _config = config;
-        _httpClient = new HttpClient { BaseAddress = new Uri(config.BaseApiUrl) };
+        // With the trailing slash, an API under a path (https://example.com/wbskt) keeps that path:
+        // a relative "api/v1/..." resolves after it rather than replacing it.
+        _httpClient = new HttpClient { BaseAddress = new Uri(config.BaseApiUrl.TrimEnd('/') + "/") };
     }
 
     public async Task<(Guid ClientRefId, string Secret)> RegisterAsync(string pin)

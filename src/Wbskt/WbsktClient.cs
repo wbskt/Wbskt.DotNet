@@ -74,8 +74,15 @@ public sealed class WbsktClient : IWbsktClient
     {
     }
 
+    /// <exception cref="ArgumentException">
+    /// The configuration can never connect: an empty or over-long name, an API URL that isn't an absolute
+    /// http(s) URL, a socket URL that isn't an absolute ws(s) URL, or a negative buffer size.
+    /// </exception>
     public WbsktClient(ClientConfig config, IClientStorage storage)
     {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(storage);
+        Validate(config);
         _config = config;
         _storage = storage;
         _auth = new AuthClient(config);
@@ -168,6 +175,36 @@ public sealed class WbsktClient : IWbsktClient
             _lifecycle.Release();
         }
     }
+
+    /// <summary>The longest client name the platform stores.</summary>
+    internal const int MaxClientNameLength = 100;
+
+    // Refused here, where the mistake is made: every one of these would otherwise be retried for ever.
+    private static void Validate(ClientConfig config)
+    {
+        if (string.IsNullOrWhiteSpace(config.ClientName) || config.ClientName.Length > MaxClientNameLength)
+        {
+            throw new ArgumentException($"ClientName must be 1-{MaxClientNameLength} characters.", nameof(config));
+        }
+
+        if (!IsAbsolute(config.BaseApiUrl, Uri.UriSchemeHttp, Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException($"BaseApiUrl must be an absolute http or https URL, not '{config.BaseApiUrl}'.", nameof(config));
+        }
+
+        if (!IsAbsolute(config.BaseSocketUrl, Uri.UriSchemeWs, Uri.UriSchemeWss))
+        {
+            throw new ArgumentException($"BaseSocketUrl must be an absolute ws or wss URL, not '{config.BaseSocketUrl}'.", nameof(config));
+        }
+
+        if (config.OfflineBufferSize < 0)
+        {
+            throw new ArgumentException("OfflineBufferSize can't be negative; 0 turns buffering off.", nameof(config));
+        }
+    }
+
+    private static bool IsAbsolute(string? url, params string[] schemes) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && schemes.Contains(uri.Scheme, StringComparer.OrdinalIgnoreCase);
 
     private async Task ConnectInternalAsync()
     {
