@@ -56,6 +56,9 @@ public sealed class WbsktClient : IWbsktClient
 
     public int PendingMessageCount => _outbound.Count;
 
+    /// <inheritdoc/>
+    public long DroppedMessageCount => _outbound.DroppedCount;
+
     public bool IsConnected => _socket.IsConnected && Announced;
 
     /// <summary>
@@ -208,33 +211,23 @@ public sealed class WbsktClient : IWbsktClient
 
     private async Task ConnectInternalAsync()
     {
+        if (!_resolvedRefId.HasValue)
+        {
+            await ResolveCredentialsAsync();
+        }
+
+        // Reuses the last token while it is still valid. Throws CredentialsRejectedException when the client was
+        // deleted or its secret rotated; the credentials are kept, as registering again would bring a deleted
+        // device back as a new client.
+        var token = await _tokens.GetAsync();
+
         try
         {
-            // 1. Resolve Credentials (Load or Register) if not already done
-            if (!_resolvedRefId.HasValue)
-            {
-                await ResolveCredentialsAsync();
-            }
-
-            // 2. Obtain JWT, reusing the last one while it is still valid
-            // Throws CredentialsRejectedException when the client was deleted or its secret rotated. The
-            // credentials are kept: registering again would bring a deleted device back as a new client.
-            var token = await _tokens.GetAsync();
-
-            // 3. Connect to real-time gateway
-            try
-            {
-                await _socket.ConnectAsync(token);
-            }
-            catch (Exception) when (_socket.TokenRejected)
-            {
-                _tokens.Invalidate();
-                throw;
-            }
+            await _socket.ConnectAsync(token);
         }
-        catch (Exception)
+        catch (Exception) when (_socket.TokenRejected)
         {
-            // Reconnection monitor will handle retries
+            _tokens.Invalidate();
             throw;
         }
     }
@@ -401,9 +394,9 @@ public sealed class WbsktClient : IWbsktClient
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) == 1, this);
 
-        if (ClientMessageRules.Check(type, null) is { } violation)
+        if (ClientMessageRules.FindViolation(type) is { } violation)
         {
-            throw new ArgumentException(violation.Message, nameof(type));
+            throw new ArgumentException(violation, nameof(type));
         }
 
         return EnqueueAsync(type, payload, nameof(payload));

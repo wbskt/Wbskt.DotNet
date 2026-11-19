@@ -68,7 +68,8 @@ client. Dictionary keys go out exactly as given. Earlier betas sent property nam
 **Offline.** `SendAsync` while disconnected queues the message (1,000 by default,
 `ClientConfig.OfflineBufferSize`) and sends it in order, with its original time, on reconnect. Sends
 are paced at 8 a second after a burst of 50, under the gateway's limit, so a full buffer takes about
-two minutes to drain.
+two minutes to drain. A full buffer drops its oldest message for each new one; `DroppedMessageCount` says
+how many have gone that way.
 
 **Stopping.** `StopAsync` closes the connection normally and stops reconnecting; the queue and the
 handlers stay, and `StartAsync` connects again. `IsConnected` says whether the client is connected

@@ -3,14 +3,6 @@ using System.Text.Json.Serialization;
 namespace Wbskt.Internal;
 
 /// <summary>
-/// The payload of <see cref="MessageTypes.Ping"/>. The client echoes <see cref="Id"/> (and the
-/// timestamp, which older servers read) in its <see cref="PongPayload"/>.
-/// </summary>
-internal sealed record PingPayload(
-    [property: JsonPropertyName("timestamp")] DateTime Timestamp,
-    [property: JsonPropertyName("id")] string? Id = null);
-
-/// <summary>
 /// The payload of <see cref="MessageTypes.Pong"/>. The server measures the round trip on its own
 /// clock and matches the ping by <see cref="Id"/>; it does not trust <see cref="OriginalTimestamp"/>.
 /// </summary>

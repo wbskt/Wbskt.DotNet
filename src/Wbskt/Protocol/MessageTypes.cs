@@ -11,7 +11,7 @@ internal static class MessageTypes
 {
     public const string SystemPrefix = "sys.";
 
-    /// <summary>Server to client: answer with <see cref="Pong"/>. Payload: <see cref="PingPayload"/>.</summary>
+    /// <summary>Server to client: answer with <see cref="Pong"/>. Its payload carries an <c>id</c> the pong echoes.</summary>
     public const string Ping = "sys.ping";
 
     /// <summary>Client to server, answering a <see cref="Ping"/>. Payload: <see cref="PongPayload"/>.</summary>

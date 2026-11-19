@@ -17,7 +17,12 @@ internal sealed class OutboundBuffer(int capacity)
         get { lock (_gate) { return _items.Count; } }
     }
 
-    public long DroppedCount { get; private set; }
+    private long _dropped;
+
+    public long DroppedCount
+    {
+        get { lock (_gate) { return _dropped; } }
+    }
 
     public void Enqueue(OutboundFrame message)
     {
@@ -25,14 +30,14 @@ internal sealed class OutboundBuffer(int capacity)
         {
             if (Capacity <= 0)
             {
-                DroppedCount++;
+                _dropped++;
                 return;
             }
 
             while (_items.Count >= Capacity)
             {
                 _items.RemoveFirst();
-                DroppedCount++;
+                _dropped++;
             }
 
             _items.AddLast(message);

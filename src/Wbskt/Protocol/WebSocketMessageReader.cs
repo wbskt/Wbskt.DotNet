@@ -38,8 +38,6 @@ internal sealed class WebSocketMessageReader : IDisposable
         _maxMessageBytes = maxMessageBytes;
     }
 
-    public int MaxMessageBytes => _maxMessageBytes;
-
     public async Task<MessageRead> ReadAsync(CancellationToken cancellationToken)
     {
         _message.SetLength(0);

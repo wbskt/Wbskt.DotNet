@@ -54,6 +54,21 @@ public sealed class WbsktClientTests
     }
 
     [Fact]
+    public async Task A_full_buffer_counts_the_messages_it_drops()
+    {
+        await using var client = new WbsktClient(
+            new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", "pin") { OfflineBufferSize = 2 }, new MemoryStorage());
+
+        for (var i = 0; i < 5; i++)
+        {
+            await client.SendAsync("reading", i);
+        }
+
+        client.PendingMessageCount.Should().Be(2);
+        client.DroppedMessageCount.Should().Be(3);
+    }
+
+    [Fact]
     public async Task A_failed_first_attempt_is_raised_with_why()
     {
         await using var client = NewClient();

@@ -2,52 +2,27 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Wbskt.Internal;
 
-/// <summary>
-/// What a message sent to a client may look like, whoever sends it: the console, a message
-/// template, or a workflow step. Kept in one place so a workflow cannot send what the console refuses.
-/// </summary>
+/// <summary>Which message types an app may send: 1-64 characters and not one the protocol reserves.</summary>
 internal static class ClientMessageRules
 {
     public const int MaxTypeLength = MessageTypes.MaxTypeLength;
 
-    /// <summary>Half the 64 KB socket message cap, leaving room for the envelope.</summary>
-    public const int MaxPayloadChars = ClientProtocol.MaxMessageBytes / 2;
-
-    public static bool IsReserved(string messageType) => MessageTypes.IsReserved(messageType);
-
     public static bool IsValidType([NotNullWhen(true)] string? messageType) =>
         !string.IsNullOrWhiteSpace(messageType) && messageType.Length <= MaxTypeLength;
 
-    /// <summary>Why a message of this type and payload may not be sent, or null when it may.</summary>
-    public static string? FindViolation(string? messageType, string? payload) => Check(messageType, payload)?.Message;
-
-    /// <summary>The rule a message of this type and payload breaks, or null when it may be sent.</summary>
-    public static ClientMessageViolation? Check(string? messageType, string? payload)
+    /// <summary>Why a message of this type may not be sent, or null when it may.</summary>
+    public static string? FindViolation(string? messageType)
     {
         if (!IsValidType(messageType))
         {
-            return new ClientMessageViolation(ClientMessageRule.TypeLength, $"Message type must be 1-{MaxTypeLength} characters.");
+            return $"Message type must be 1-{MaxTypeLength} characters.";
         }
 
-        if (IsReserved(messageType))
+        if (MessageTypes.IsReserved(messageType))
         {
-            return new ClientMessageViolation(ClientMessageRule.TypeReserved, $"Message type '{messageType}' is reserved for the platform protocol.");
-        }
-
-        if (payload is { Length: > MaxPayloadChars })
-        {
-            return new ClientMessageViolation(ClientMessageRule.PayloadSize, $"Message payload is limited to {MaxPayloadChars} characters.");
+            return $"Message type '{messageType}' is reserved for the platform protocol.";
         }
 
         return null;
     }
 }
-
-internal enum ClientMessageRule
-{
-    TypeLength,
-    TypeReserved,
-    PayloadSize
-}
-
-internal sealed record ClientMessageViolation(ClientMessageRule Rule, string Message);

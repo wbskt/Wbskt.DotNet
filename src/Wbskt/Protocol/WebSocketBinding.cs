@@ -9,12 +9,6 @@ internal static class WebSocketBinding
     /// </summary>
     public const string Subprotocol = "wbskt.v1";
 
-    /// <summary>
-    /// The close code a client sends when it closes to install a firmware update. The gateway reports
-    /// the client as updating rather than offline, for up to the platform's update window.
-    /// </summary>
-    public const int UpdatingCloseCode = 4000;
-
     /// <summary>The gateway closed this connection because a newer one for the same client replaced it.</summary>
     public const int SupersededCloseCode = 4001;
 
