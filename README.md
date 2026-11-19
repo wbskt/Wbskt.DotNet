@@ -69,9 +69,24 @@ still announces itself and reconnects.
 
 **Not connecting?** `OnConnectFailed` is raised with the exception for every failed attempt (an
 unreachable URL, TLS, or a refused registration or login, for now told apart only by its message),
-while the client keeps retrying. If the saved credentials are rejected and there is no PIN to register
-again, it is raised with `RegistrationRequiredException` and the client stops for good: dispose it and
-create a new one with a PIN.
+while the client keeps retrying. With no saved credentials and no PIN it is raised with
+`RegistrationRequiredException`, and the client stops for good: dispose it and create a new one with a PIN.
+
+**Secret rotated or client deleted.** When someone rotates the client's secret or deletes the client in
+the console, login refuses the saved credentials. `StartAsync` throws (or `OnConnectFailed` is raised
+with) `CredentialsRejectedException`, and the client stops for good and keeps its credentials file. It
+never registers again by itself: a deleted device would come back as a new client, and a rotated one
+would stay offline beside a duplicate. To install a rotated secret, save it beside the same client id
+and start again:
+
+```csharp
+var storage = FileClientStorage.ForClient("greenhouse-sensor");
+var (clientRefId, _) = await storage.LoadCredentialsAsync();
+await storage.SaveCredentialsAsync(clientRefId!.Value, "the-new-secret");
+```
+
+To register again on purpose (the client was deleted, or you point it at a fresh install), call
+`ClearCredentialsAsync()` on the storage or delete the file; the next start registers with the PIN.
 
 **Message size.** A message over 64 KB once serialised throws `ArgumentException` from `SendAsync` or
 `ReportStateAsync`; send a link to anything bigger.

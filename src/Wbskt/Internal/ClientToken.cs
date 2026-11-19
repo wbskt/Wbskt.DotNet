@@ -1,5 +1,3 @@
-using System.Security;
-
 namespace Wbskt.Internal;
 
 /// <summary>A client access token and when it stops being accepted.</summary>
@@ -50,7 +48,3 @@ internal sealed class ClientAuthThrottledException(string step, TimeSpan? retryA
 {
     public TimeSpan? RetryAfter { get; } = retryAfter;
 }
-
-/// <summary>The client login answered <c>CLIENT_UNAUTHORIZED</c>: the client was deleted or its secret rotated.</summary>
-internal sealed class CredentialsRejectedException()
-    : SecurityException("The stored client credentials were rejected.");

@@ -45,7 +45,7 @@ internal sealed class AuthClient : IDisposable
 
         if (response.StatusCode == HttpStatusCode.Unauthorized && await ErrorCodeAsync(response) == ClientErrorCodes.Unauthorized)
         {
-            throw new CredentialsRejectedException();
+            throw new CredentialsRejectedException(clientRefId);
         }
 
         if (!response.IsSuccessStatusCode)
