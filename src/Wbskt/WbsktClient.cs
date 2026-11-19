@@ -316,6 +316,7 @@ public sealed class WbsktClient : IWbsktClient
             {
                 // Just dropped. Every client that shared this socket host noticed at the same moment,
                 // so each waits a random part of the window before its first attempt.
+                await _socket.WaitForDropAsync();
                 var close = _socket.LastClose;
                 if (close == ServerClose.Revoked)
                 {

@@ -246,6 +246,20 @@ public sealed class WbsktClientTests
     }
 
     [Fact]
+    public async Task A_close_for_lost_access_logs_in_again_before_reconnecting()
+    {
+        await using var server = new FakeWbskt();
+        await using var client = server.NewClient();
+        await client.StartAsync();
+        await server.WaitForAsync("capabilities");
+
+        await server.Sockets.Single().CloseOutputAsync((WebSocketCloseStatus)WebSocketBinding.RevokedCloseCode, "Revoked", CancellationToken.None);
+        await server.WaitForCountAsync("capabilities", 2);
+
+        server.Logins.Should().Be(2);
+    }
+
+    [Fact]
     public async Task A_command_is_acked_and_reaches_the_message_handler()
     {
         await using var server = new FakeWbskt();
