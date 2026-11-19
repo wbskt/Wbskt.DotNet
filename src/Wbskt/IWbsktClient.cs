@@ -49,7 +49,16 @@ public interface IWbsktClient : IAsyncDisposable
     /// <summary>Messages waiting in the offline buffer.</summary>
     int PendingMessageCount { get; }
 
+    /// <summary>Connected, with the client's capabilities sent, so a message sent now goes straight out.</summary>
+    bool IsConnected { get; }
+
     Task StartAsync();
+
+    /// <summary>
+    /// Closes the connection normally (1000) and stops reconnecting. The offline buffer and the handlers
+    /// are kept, and <see cref="StartAsync"/> connects again. Messages sent while stopped wait in the buffer.
+    /// </summary>
+    Task StopAsync();
 
     /// <summary>
     /// Sends an application message. The types "capabilities", "state.report" and anything

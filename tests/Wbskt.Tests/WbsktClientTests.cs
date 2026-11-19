@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using FluentAssertions;
 using Wbskt.Internal;
 
@@ -180,6 +181,105 @@ public sealed class WbsktClientTests
         client.PendingMessageCount.Should().Be(0);
         server.Sockets.Should().HaveCount(1);
         server.Logins.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Disposing_closes_the_connection_normally()
+    {
+        await using var server = new FakeWbskt();
+        var client = server.NewClient();
+        await client.StartAsync();
+        await server.WaitForAsync("capabilities");
+
+        await client.DisposeAsync();
+
+        await WaitUntilAsync(() => !server.Closes.IsEmpty);
+        server.Closes.Should().Equal(WebSocketCloseStatus.NormalClosure);
+    }
+
+    [Fact]
+    public async Task Stopping_closes_normally_keeps_the_buffer_and_a_start_connects_again()
+    {
+        await using var server = new FakeWbskt();
+        await using var client = server.NewClient();
+        await client.StartAsync();
+        await server.WaitForAsync("capabilities");
+        await WaitUntilAsync(() => client.IsConnected);
+
+        await client.StopAsync();
+        client.IsConnected.Should().BeFalse();
+        await client.SendAsync("reading", new { celsius = 20.0 });
+        await Task.Delay(1500);
+
+        // Stopped means stopped: no reconnect, and the message waits.
+        server.Sockets.Should().HaveCount(1);
+        client.PendingMessageCount.Should().Be(1);
+        server.Closes.Should().Equal(WebSocketCloseStatus.NormalClosure);
+
+        await client.StartAsync();
+        var reading = await server.WaitForAsync("reading");
+        reading.GetProperty("payload").GetProperty("celsius").GetDouble().Should().Be(20.0);
+        server.Sockets.Should().HaveCount(2);
+        client.IsConnected.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Disposing_while_waiting_to_reconnect_ends_the_wait_cleanly()
+    {
+        var unobserved = 0;
+        // Other tests run alongside and may leave their own, so only this client's monitor counts.
+        EventHandler<UnobservedTaskExceptionEventArgs> count = (_, args) =>
+        {
+            if (args.Exception.InnerExceptions.Any(e => e.StackTrace?.Contains("MonitorReconnection") == true))
+            {
+                Interlocked.Increment(ref unobserved);
+            }
+        };
+        TaskScheduler.UnobservedTaskException += count;
+        try
+        {
+            // Nothing listens here, so the first attempt fails and the client waits to retry.
+            var client = new WbsktClient(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", "pin"), new FakeWbskt.SavedStorage(Guid.NewGuid(), "secret"));
+            await client.StartAsync();
+
+            await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            unobserved.Should().Be(0);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= count;
+        }
+    }
+
+    [Fact]
+    public async Task Every_call_after_dispose_throws()
+    {
+        var client = new WbsktClient(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", "pin"), new FakeWbskt.SavedStorage(Guid.NewGuid(), "secret"));
+        await client.DisposeAsync();
+
+        await FluentActions.Awaiting(client.StartAsync).Should().ThrowAsync<ObjectDisposedException>();
+        await FluentActions.Awaiting(client.StopAsync).Should().ThrowAsync<ObjectDisposedException>();
+        await FluentActions.Awaiting(() => client.SendAsync("reading", 1)).Should().ThrowAsync<ObjectDisposedException>();
+        await FluentActions.Awaiting(() => client.ReportStateAsync(new Dictionary<string, object?>())).Should().ThrowAsync<ObjectDisposedException>();
+        await FluentActions.Awaiting(() => client.UpdateCapabilitiesAsync(new ClientCapabilities("", "", "", []))).Should().ThrowAsync<ObjectDisposedException>();
+        await client.DisposeAsync();
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("the condition never held");
+            }
+
+            await Task.Delay(20);
+        }
     }
 
     [Fact]

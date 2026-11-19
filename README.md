@@ -70,6 +70,12 @@ client. Dictionary keys go out exactly as given. Earlier betas sent property nam
 are paced at 8 a second after a burst of 50, under the gateway's limit, so a full buffer takes about
 two minutes to drain.
 
+**Stopping.** `StopAsync` closes the connection normally and stops reconnecting; the queue and the
+handlers stay, and `StartAsync` connects again. `IsConnected` says whether the client is connected
+with its capabilities sent, so a message sent now goes straight out. Disposing closes normally too,
+then drops anything still queued: check `PendingMessageCount` before disposing if that matters. Any
+call after disposing throws `ObjectDisposedException`.
+
 **Handlers.** Messages reach `MessageHandler` one at a time, in order, on the SDK's own task: each
 call is awaited before the next message is handed over, and a slow handler doesn't delay the
 connection's pings. The payload is a `JsonElement`; `PayloadAs<T>()` reads it into your own type,
