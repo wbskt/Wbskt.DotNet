@@ -67,6 +67,11 @@ internal sealed class SocketClient : IAsyncDisposable
             return;
         }
 
+        // The last connection's receive loop answers the server's close and reports the drop; let it finish on
+        // its own socket first, so neither lands on the new connection.
+        await _receive.WaitAsync(CloseTimeout).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        Abort(_webSocket);
+
         // Reset state for new connection
         if (_cts.IsCancellationRequested)
         {
@@ -108,7 +113,8 @@ internal sealed class SocketClient : IAsyncDisposable
         // Raised before the loop starts, so capabilities are sent before any pong or ack and the app hears
         // of the connection before its first message; the guard means a throwing handler cannot stop the loop.
         Handlers.Raise(OnConnected, OnHandlerError);
-        _receive = Task.Run(ReceiveLoopAsync, _cts.Token);
+        var socket = _webSocket;
+        _receive = Task.Run(() => ReceiveLoopAsync(socket), _cts.Token);
     }
 
     /// <summary>
@@ -159,13 +165,14 @@ internal sealed class SocketClient : IAsyncDisposable
 
         // ClientWebSocket allows one send at a time; pongs, acks and app messages share the socket.
         await _sendLock.WaitAsync();
+        var socket = _webSocket;
         try
         {
-            await _webSocket.SendAsync(frame, WebSocketMessageType.Text, true, _cts.Token);
+            await socket.SendAsync(frame, WebSocketMessageType.Text, true, _cts.Token);
         }
         catch (Exception)
         {
-            await AbortAsync();
+            Abort(socket);
             throw;
         }
         finally
@@ -174,23 +181,23 @@ internal sealed class SocketClient : IAsyncDisposable
         }
     }
 
-    private async Task ReceiveLoopAsync()
+    private async Task ReceiveLoopAsync(ClientWebSocket socket)
     {
-        using var reader = new WebSocketMessageReader(_webSocket, ClientProtocol.MaxMessageBytes);
+        using var reader = new WebSocketMessageReader(socket, ClientProtocol.MaxMessageBytes);
         try
         {
-            while (_webSocket.State == WebSocketState.Open && !_cts.Token.IsCancellationRequested)
+            while (socket.State == WebSocketState.Open && !_cts.Token.IsCancellationRequested)
             {
                 var read = await reader.ReadAsync(_cts.Token);
                 switch (read.Kind)
                 {
                     case FrameKind.Closed:
-                        LastClose = ServerCloses.From(_webSocket.CloseStatus);
+                        LastClose = ServerCloses.From(socket.CloseStatus);
 
                         // Answered unless this client closed first, which already sent its close.
-                        if (_webSocket.State == WebSocketState.CloseReceived)
+                        if (socket.State == WebSocketState.CloseReceived)
                         {
-                            await _webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Acknowledged", _cts.Token);
+                            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Acknowledged", _cts.Token);
                         }
 
                         return;
@@ -211,7 +218,7 @@ internal sealed class SocketClient : IAsyncDisposable
         }
         finally
         {
-            await AbortAsync();
+            Abort(socket);
             Handlers.Raise(OnDisconnected, OnHandlerError);
         }
     }
@@ -330,18 +337,22 @@ internal sealed class SocketClient : IAsyncDisposable
 
     private Task AbortAsync()
     {
-        if (_webSocket.State is WebSocketState.Closed or WebSocketState.Aborted)
+        Abort(_webSocket);
+        return Task.CompletedTask;
+    }
+
+    private static void Abort(ClientWebSocket socket)
+    {
+        if (socket.State is WebSocketState.Closed or WebSocketState.Aborted)
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        try { _webSocket.Abort(); }
+        try { socket.Abort(); }
         catch
         {
             // ignored
         }
-
-        return Task.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
