@@ -30,11 +30,23 @@ wbskt.MessageHandler = async (message, cancellationToken) =>
     }
 };
 
+using var stop = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
+
 await wbskt.StartAsync();
 
-await wbskt.SendAsync("temperature", new { celsius = 21.5 });
-await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["celsius"] = 21.5 });
+// Keep the program running: when it ends, the client is disposed and goes offline.
+while (!stop.IsCancellationRequested)
+{
+    await wbskt.SendAsync("temperature", new { celsius = 21.5 });
+    await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["celsius"] = 21.5 });
+    await Task.Delay(TimeSpan.FromSeconds(10), stop.Token).ContinueWith(_ => { });
+}
 ```
+
+`StartAsync` returns once the first connection attempt has finished; the client then runs in the
+background for as long as it isn't disposed, so the program has to keep running (here until Ctrl+C).
+A service does the same in its hosted service's `ExecuteAsync`.
 
 The PIN comes from a registration policy in the console (Policies). The first start registers the
 client and saves its credentials in `wbskt/greenhouse-sensor.json` under your local application data
