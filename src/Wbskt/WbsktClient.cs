@@ -204,6 +204,9 @@ public sealed class WbsktClient : IWbsktClient
         {
             throw new ArgumentException("OfflineBufferSize can't be negative; 0 turns buffering off.", nameof(config));
         }
+
+        // They go out first on every connection, so commands too big to send would never connect.
+        ProtocolJson.Frame(new ProtocolMessage(MessageTypes.Capabilities, Effective(config, null)), nameof(config));
     }
 
     private static bool IsAbsolute(string? url, params string[] schemes) =>
@@ -261,13 +264,15 @@ public sealed class WbsktClient : IWbsktClient
         await FlushOutboundAsync();
     }
 
-    private static ClientCapabilities BuildEffectiveCapabilities(ClientCapabilities? app)
+    private ClientCapabilities BuildEffectiveCapabilities(ClientCapabilities? app) => Effective(_config, app);
+
+    private static ClientCapabilities Effective(ClientConfig config, ClientCapabilities? app)
     {
-        // Auto-detected SDK metadata; app-supplied values win when explicitly set.
+        // Auto-detected SDK metadata; app-supplied values win when explicitly set, then the configuration's.
         var agent = app is { Agent.Length: > 0 } ? app.Agent : SdkInfo.AgentName;
         var version = app is { Version.Length: > 0 } ? app.Version : SdkInfo.Version;
         var os = app is { OS.Length: > 0 } ? app.OS : SdkInfo.Platform;
-        return new ClientCapabilities(agent, version, os, app?.Capabilities ?? [], app?.FirmwareVersion);
+        return new ClientCapabilities(agent, version, os, app?.Capabilities ?? [.. config.Commands], app?.FirmwareVersion ?? config.FirmwareVersion);
     }
 
     private bool Announced => Volatile.Read(ref _announcedConnection) == Volatile.Read(ref _connection);

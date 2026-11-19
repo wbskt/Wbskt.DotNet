@@ -58,8 +58,25 @@ var config = new ClientConfig("https://api.example.com", "wss://ws.example.com",
 await using var wbskt = new WbsktClient(config, new FileClientStorage("/etc/wbskt/client.json"));
 ```
 
-**Commands.** Declare the commands the client takes with `UpdateCapabilitiesAsync` and they show up
-in the console's send panel. Delivery acks and expired-command refusals are sent for you.
+**Commands.** Declare the commands the client takes in its configuration and they show up in the
+console's send panel, with a field for each parameter. Delivery acks and expired-command refusals are
+sent for you.
+
+```csharp
+var config = new ClientConfig(WbsktDefaults.ApiUrl, WbsktDefaults.SocketUrl, "greenhouse-sensor", "your-policy-pin")
+{
+    FirmwareVersion = "1.4.0",
+    Commands =
+    [
+        new CommandCapability("led.set", "Turn the LED on or off",
+            [new PropertySchema("on", DataType.Boolean, IsRequired: true)]),
+        new CommandCapability("fan.speed", "Set the fan speed",
+            [new PropertySchema("rpm", DataType.Number, DefaultValue: "1200") { Label = "Speed (rpm)" }]),
+    ],
+};
+```
+
+`UpdateCapabilitiesAsync` replaces them while the client runs, for one whose commands change.
 
 **Property names.** Payloads go out with camelCase property names (`Celsius` is sent as `celsius`),
 as the Python and Arduino clients send them, so a workflow reading `payload.celsius` works for every
