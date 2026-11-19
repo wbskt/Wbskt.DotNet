@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace Wbskt.Internal;
@@ -7,7 +8,16 @@ namespace Wbskt.Internal;
 /// </summary>
 internal static class ProtocolJson
 {
-    public static byte[] Serialize(ProtocolMessage message) => JsonSerializer.SerializeToUtf8Bytes(message);
+    /// <summary>
+    /// camelCase property names, as the Python and Arduino clients send and the console's declared command
+    /// parameters use; dictionary keys stay as given. Reading matches names ignoring case.
+    /// </summary>
+    public static JsonSerializerOptions Options { get; } = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    public static byte[] Serialize(ProtocolMessage message) => JsonSerializer.SerializeToUtf8Bytes(message, Options);
 
     /// <summary>
     /// The message as the bytes that will be sent, serialised now: a payload the app changes later (a reused
