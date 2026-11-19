@@ -7,7 +7,7 @@ namespace Wbskt.Internal;
 /// </summary>
 internal sealed class OutboundBuffer(int capacity)
 {
-    private readonly LinkedList<ProtocolMessage> _items = new();
+    private readonly LinkedList<OutboundFrame> _items = new();
     private readonly object _gate = new();
 
     public int Capacity { get; } = capacity;
@@ -19,7 +19,7 @@ internal sealed class OutboundBuffer(int capacity)
 
     public long DroppedCount { get; private set; }
 
-    public void Enqueue(ProtocolMessage message)
+    public void Enqueue(OutboundFrame message)
     {
         lock (_gate)
         {
@@ -39,7 +39,7 @@ internal sealed class OutboundBuffer(int capacity)
         }
     }
 
-    public bool TryPeek(out ProtocolMessage message)
+    public bool TryPeek(out OutboundFrame message)
     {
         lock (_gate)
         {
@@ -58,7 +58,7 @@ internal sealed class OutboundBuffer(int capacity)
     /// Removes <paramref name="message"/> if it is still at the head. It may already be gone
     /// when the buffer overflowed while it was being sent.
     /// </summary>
-    public void RemoveIfHead(ProtocolMessage message)
+    public void RemoveIfHead(OutboundFrame message)
     {
         lock (_gate)
         {

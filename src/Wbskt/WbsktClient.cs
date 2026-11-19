@@ -272,13 +272,12 @@ public sealed class WbsktClient : IWbsktClient
     public async Task UpdateCapabilitiesAsync(ClientCapabilities capabilities)
     {
         // Checked before they are kept: they go out first on every connection, so too big would never connect.
-        var message = new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities(capabilities));
-        ProtocolJson.EnsureWithinLimit(message, nameof(capabilities));
+        var frame = ProtocolJson.Frame(new ProtocolMessage(MessageTypes.Capabilities, BuildEffectiveCapabilities(capabilities)), nameof(capabilities));
         _lastCapabilities = capabilities;
 
         if (_socket.IsConnected)
         {
-            await _socket.SendAsync(message);
+            await _socket.SendAsync(frame.Bytes);
         }
     }
 
@@ -298,11 +297,10 @@ public sealed class WbsktClient : IWbsktClient
 
     private async Task EnqueueAsync(string type, object payload, string paramName)
     {
-        var message = new ProtocolMessage(type, payload) { SentAt = DateTimeOffset.UtcNow };
-
-        // The gateway closes the connection on a bigger one, and a buffered one would be resent first on
-        // every reconnect and never get through.
-        ProtocolJson.EnsureWithinLimit(message, paramName);
+        // Serialised now, so a payload the app reuses (one dictionary refilled every reading) keeps the values
+        // it had when it was sent. Checked now too: the gateway closes the connection on a bigger one, and a
+        // buffered one would be resent first on every reconnect and never get through.
+        var frame = ProtocolJson.Frame(new ProtocolMessage(type, payload) { SentAt = DateTimeOffset.UtcNow }, paramName);
 
         if (_outbound.Capacity <= 0)
         {
@@ -315,7 +313,7 @@ public sealed class WbsktClient : IWbsktClient
             try
             {
                 await _pacer.TakeAsync(_cts.Token);
-                await _socket.SendAsync(message);
+                await _socket.SendAsync(frame.Bytes);
             }
             finally
             {
@@ -326,7 +324,7 @@ public sealed class WbsktClient : IWbsktClient
         }
 
         // Every message goes through the buffer so a backlog from an outage is never overtaken.
-        _outbound.Enqueue(message);
+        _outbound.Enqueue(frame);
         await FlushOutboundAsync();
     }
 
@@ -347,7 +345,7 @@ public sealed class WbsktClient : IWbsktClient
                     try
                     {
                         await _pacer.TakeAsync(_cts.Token);
-                        await _socket.SendAsync(next);
+                        await _socket.SendAsync(next.Bytes);
                     }
                     catch (Exception)
                     {

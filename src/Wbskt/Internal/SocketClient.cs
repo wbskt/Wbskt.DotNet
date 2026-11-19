@@ -107,20 +107,22 @@ internal sealed class SocketClient : IAsyncDisposable
         _ = Task.Run(ReceiveLoopAsync, _cts.Token);
     }
 
-    public async Task SendAsync(ProtocolMessage message)
+    /// <summary>Sends a message the client builds as it goes: a pong, an ack, capabilities.</summary>
+    public Task SendAsync(ProtocolMessage message) => SendAsync(ProtocolJson.Serialize(message));
+
+    /// <summary>Sends a message serialised earlier, as it is.</summary>
+    public async Task SendAsync(ReadOnlyMemory<byte> frame)
     {
         if (_webSocket.State != WebSocketState.Open)
         {
             throw new InvalidOperationException("Socket not connected.");
         }
 
-        var bytes = ProtocolJson.Serialize(message);
-        
         // ClientWebSocket allows one send at a time; pongs, acks and app messages share the socket.
         await _sendLock.WaitAsync();
         try
         {
-            await _webSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
+            await _webSocket.SendAsync(frame, WebSocketMessageType.Text, true, _cts.Token);
         }
         catch (Exception)
         {

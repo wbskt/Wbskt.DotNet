@@ -182,6 +182,27 @@ public sealed class WbsktClientTests
         server.Logins.Should().Be(1);
     }
 
+    [Fact]
+    public async Task A_reused_payload_goes_out_with_the_values_it_had_when_it_was_sent()
+    {
+        await using var server = new FakeWbskt();
+        await using var client = server.NewClient();
+        var state = new Dictionary<string, object?>();
+
+        // Offline, so both wait in the buffer.
+        state["celsius"] = 20.0;
+        await client.ReportStateAsync(state);
+        state["celsius"] = 21.0;
+        await client.ReportStateAsync(state);
+        state["celsius"] = 99.0;
+        await client.StartAsync();
+
+        await server.WaitForCountAsync("state.report", 2);
+        server.Received.Where(frame => frame.GetProperty("type").GetString() == "state.report")
+            .Select(frame => frame.GetProperty("payload").GetProperty("celsius").GetDouble())
+            .Should().Equal(20.0, 21.0);
+    }
+
     private static WbsktClient NewClient(string? pin = "pin") =>
         new(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", pin), new MemoryStorage());
 
