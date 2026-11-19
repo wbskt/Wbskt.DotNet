@@ -14,6 +14,7 @@ internal sealed class SocketClient : IAsyncDisposable
     private readonly Channel<InboundMessage> _inbox = Channel.CreateUnbounded<InboundMessage>(new UnboundedChannelOptions { SingleReader = true });
     private readonly CancellationTokenSource _dispatchCts = new();
     private readonly Task _dispatch;
+    private Task _receive = Task.CompletedTask;
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
@@ -32,6 +33,9 @@ internal sealed class SocketClient : IAsyncDisposable
     private static readonly AsyncLocal<SocketClient?> HandlerOf = new();
 
     private int _disposed;
+
+    /// <summary>How long a stop or dispose waits for the server to answer its close.</summary>
+    internal static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>An app's handler threw. The connection stays up and the next message is handed over as usual.</summary>
     public event Action<Exception>? OnHandlerError;
@@ -104,7 +108,42 @@ internal sealed class SocketClient : IAsyncDisposable
         // Raised before the loop starts, so capabilities are sent before any pong or ack and the app hears
         // of the connection before its first message; the guard means a throwing handler cannot stop the loop.
         Handlers.Raise(OnConnected, OnHandlerError);
-        _ = Task.Run(ReceiveLoopAsync, _cts.Token);
+        _receive = Task.Run(ReceiveLoopAsync, _cts.Token);
+    }
+
+    /// <summary>
+    /// Ends the connection with a normal close (1000), so the gateway records a clean stop rather than a
+    /// lost link, and waits up to <paramref name="timeout"/> for the server's answer before giving up.
+    /// </summary>
+    public async Task CloseAsync(TimeSpan timeout)
+    {
+        if (_webSocket.State != WebSocketState.Open)
+        {
+            return;
+        }
+
+        using var bounded = new CancellationTokenSource(timeout);
+        try
+        {
+            // A close frame must not interleave with a message being sent.
+            await _sendLock.WaitAsync(bounded.Token);
+            try
+            {
+                await _webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Client stopped", bounded.Token);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
+
+            await _receive.WaitAsync(bounded.Token);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or InvalidOperationException)
+        {
+            // The link is already gone or the server didn't answer in time; aborting below ends it either way.
+        }
+
+        await AbortAsync();
     }
 
     /// <summary>Sends a message the client builds as it goes: a pong, an ack, capabilities.</summary>
@@ -147,7 +186,13 @@ internal sealed class SocketClient : IAsyncDisposable
                 {
                     case FrameKind.Closed:
                         LastClose = ServerCloses.From(_webSocket.CloseStatus);
-                        await _webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Acknowledged", _cts.Token);
+
+                        // Answered unless this client closed first, which already sent its close.
+                        if (_webSocket.State == WebSocketState.CloseReceived)
+                        {
+                            await _webSocket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Acknowledged", _cts.Token);
+                        }
+
                         return;
                     case FrameKind.TooBig:
                         // Oversized message; drop the connection and let the reconnect monitor recover.
@@ -306,6 +351,7 @@ internal sealed class SocketClient : IAsyncDisposable
             return;
         }
 
+        await CloseAsync(CloseTimeout);
         await _cts.CancelAsync();
         await AbortAsync();
         _inbox.Writer.TryComplete();

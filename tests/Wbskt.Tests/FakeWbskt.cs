@@ -41,6 +41,9 @@ internal sealed class FakeWbskt : IAsyncDisposable
 
     public ConcurrentQueue<JsonElement> Received { get; } = new();
 
+    /// <summary>The close status each client sent, in order; a link dropped without a close is not here.</summary>
+    public ConcurrentQueue<WebSocketCloseStatus?> Closes { get; } = new();
+
     public WbsktClient NewClient() =>
         new(new ClientConfig(Url, SocketUrl, "test", "pin"), new SavedStorage(Guid.NewGuid(), "secret"));
 
@@ -123,6 +126,8 @@ internal sealed class FakeWbskt : IAsyncDisposable
                 var result = await socket.ReceiveAsync(buffer, _cts.Token);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
+                    Closes.Enqueue(result.CloseStatus);
+                    await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Bye", CancellationToken.None);
                     return;
                 }
 
