@@ -19,4 +19,6 @@ public sealed class CredentialsRejectedException(Guid clientRefId)
         "again with the PIN.")
 {
     public Guid ClientRefId { get; } = clientRefId;
+
+    public override bool IsFinal => true;
 }

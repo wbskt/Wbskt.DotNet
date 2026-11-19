@@ -33,9 +33,11 @@ public interface IWbsktClient : IAsyncDisposable
     /// or a <see cref="WbsktConnectException"/> for a refused registration or login (a wrong PIN, a full
     /// policy, approval pending, a disabled client), carrying the HTTP status and the server's code. Raised for every attempt; the client keeps
     /// retrying on its schedule, except after a <see cref="RegistrationRequiredException"/> (no saved
-    /// credentials and no PIN), a <see cref="CredentialsRejectedException"/> (the client was deleted or
-    /// its secret rotated) or a <see cref="CredentialsNotSavedException"/> (it registered but could not
-    /// save the credentials), when it stops for good: fix the cause, dispose it and create a new client.
+    /// credentials and no PIN), a <see cref="WbsktConnectException"/> that is
+    /// <see cref="WbsktConnectException.IsFinal"/> (a wrong PIN or name, or a
+    /// <see cref="CredentialsRejectedException"/>: the client was deleted or its secret rotated) or a
+    /// <see cref="CredentialsNotSavedException"/> (it registered but could not save the credentials), when it
+    /// stops: fix the cause and start it again, or create a new client with a corrected PIN or name.
     /// </summary>
     event Action<Exception>? OnConnectFailed;
     event Action? OnDisconnected;

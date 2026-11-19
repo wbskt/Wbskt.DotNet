@@ -424,35 +424,94 @@ public sealed class WbsktClientTests
             .Should().Equal(20.0, 21.0);
     }
 
+    [Theory]
+    [InlineData(404, "POLICY_NOT_FOUND", "Invalid registration PIN.")]
+    [InlineData(400, "REGISTRATION_PIN_REQUIRED", "Registration PIN is required.")]
+    [InlineData(400, "CLIENT_NAME_INVALID", "Client name must be 1-100 characters.")]
+    public async Task A_registration_no_retry_can_fix_says_why_and_stops_the_client(int status, string code, string detail)
+    {
+        var (api, url, requests) = RefusingApi(status, code, detail);
+        using var _ = api;
+        await using var client = new WbsktClient(new ClientConfig(url, "ws://127.0.0.1:1", "test", "pin"), new MemoryStorage());
+        Exception? raised = null;
+        client.OnConnectFailed += error => raised = error;
+
+        var start = () => client.StartAsync();
+
+        var refusal = (await start.Should().ThrowAsync<WbsktConnectException>()).Which;
+        refusal.Step.Should().Be(ConnectStep.Registration);
+        ((int)refusal.StatusCode).Should().Be(status);
+        refusal.Code.Should().Be(code);
+        refusal.IsFinal.Should().BeTrue();
+        refusal.Message.Should().Be($"Registration answered {status} {code}: {detail}");
+        raised.Should().BeSameAs(refusal);
+
+        // Long enough for the first retry (at most 2 s) had it kept trying.
+        await Task.Delay(TimeSpan.FromSeconds(2.5));
+        requests().Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(403, "POLICY_DISABLED")]
+    [InlineData(400, "POLICY_LIMIT_REACHED")]
+    [InlineData(409, "PLAN_CLIENT_LIMIT_REACHED")]
+    public async Task A_registration_that_can_clear_while_the_client_waits_is_retried(int status, string code)
+    {
+        var (api, url, requests) = RefusingApi(status, code, "Refused.");
+        using var _ = api;
+        await using var client = new WbsktClient(new ClientConfig(url, "ws://127.0.0.1:1", "test", "pin"), new MemoryStorage());
+        Exception? raised = null;
+        client.OnConnectFailed += error => raised = error;
+
+        await client.StartAsync();
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (requests() < 2 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        requests().Should().BeGreaterThanOrEqualTo(2);
+        raised.Should().BeOfType<WbsktConnectException>().Which.IsFinal.Should().BeFalse();
+    }
+
     [Fact]
-    public async Task A_refused_registration_says_why()
+    public async Task A_nan_or_infinite_reading_is_refused_and_never_buffered()
+    {
+        await using var client = NewClient();
+
+        var send = () => client.SendAsync("temperature", new { celsius = double.NaN });
+        var report = () => client.ReportStateAsync(new Dictionary<string, object?> { ["celsius"] = double.PositiveInfinity });
+
+        (await send.Should().ThrowAsync<ArgumentException>()).Which.ParamName.Should().Be("payload");
+        (await report.Should().ThrowAsync<ArgumentException>()).Which.ParamName.Should().Be("patch");
+        client.PendingMessageCount.Should().Be(0);
+    }
+
+    /// <summary>An API that refuses every call with the status and code; the count is how many calls came.</summary>
+    private static (HttpListener Api, string Url, Func<int> Requests) RefusingApi(int status, string code, string detail)
     {
         var probe = new TcpListener(IPAddress.Loopback, 0);
         probe.Start();
         var port = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
-        using var api = new HttpListener();
+        var api = new HttpListener();
         api.Prefixes.Add($"http://127.0.0.1:{port}/");
         api.Start();
+        var requests = 0;
         _ = Task.Run(async () =>
         {
-            var context = await api.GetContextAsync();
-            context.Response.StatusCode = 404;
-            context.Response.ContentType = "application/problem+json";
-            await context.Response.OutputStream.WriteAsync("{\"title\":\"Not Found\",\"code\":\"POLICY_NOT_FOUND\",\"detail\":\"Invalid registration PIN.\"}"u8.ToArray());
-            context.Response.Close();
+            while (api.IsListening)
+            {
+                var context = await api.GetContextAsync();
+                Interlocked.Increment(ref requests);
+                context.Response.StatusCode = status;
+                context.Response.ContentType = "application/problem+json";
+                await context.Response.OutputStream.WriteAsync(System.Text.Encoding.UTF8.GetBytes($"{{\"code\":\"{code}\",\"detail\":\"{detail}\"}}"));
+                context.Response.Close();
+            }
         });
-        await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), new MemoryStorage());
-        var failed = new TaskCompletionSource<Exception>();
-        client.OnConnectFailed += error => failed.TrySetResult(error);
-
-        await client.StartAsync();
-
-        var refusal = (await failed.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeOfType<WbsktConnectException>().Subject;
-        refusal.Step.Should().Be(ConnectStep.Registration);
-        refusal.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        refusal.Code.Should().Be("POLICY_NOT_FOUND");
-        refusal.Message.Should().Be("Registration answered 404 POLICY_NOT_FOUND: Invalid registration PIN.");
+        return (api, $"http://127.0.0.1:{port}", () => Volatile.Read(ref requests));
     }
 
     [Fact]
