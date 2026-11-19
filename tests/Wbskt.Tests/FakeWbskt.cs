@@ -64,6 +64,21 @@ internal sealed class FakeWbskt : IAsyncDisposable
         throw new TimeoutException($"no {type} frame arrived");
     }
 
+    /// <summary>Waits until <paramref name="count"/> frames of <paramref name="type"/> have arrived.</summary>
+    public async Task WaitForCountAsync(string type, int count, TimeSpan? timeout = null)
+    {
+        var deadline = DateTime.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
+        while (Received.Count(frame => frame.GetProperty("type").GetString() == type) < count)
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"fewer than {count} {type} frames arrived");
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
     private async Task ServeAsync()
     {
         while (!_cts.IsCancellationRequested)

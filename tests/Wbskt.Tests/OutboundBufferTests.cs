@@ -50,7 +50,7 @@ public sealed class OutboundBufferTests
         Assert.False(buffer.TryPeek(out _));
     }
 
-    private static ProtocolMessage Message(string type) => new(type, new { });
+    private static OutboundFrame Message(string type) => ProtocolJson.Frame(new ProtocolMessage(type, new { }), "payload");
 
     private static List<string> Drain(OutboundBuffer buffer)
     {
