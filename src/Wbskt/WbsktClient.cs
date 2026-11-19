@@ -264,7 +264,7 @@ public sealed class WbsktClient : IWbsktClient
     }
 
     private TimeSpan FailureDelay(Exception error, int failures) =>
-        error is ClientAuthThrottledException { RetryAfter: { } retryAfter }
+        error is WbsktConnectException { IsThrottled: true, RetryAfter: { } retryAfter }
             ? _reconnect.AfterThrottle(retryAfter)
             : _reconnect.RetryDelay(failures);
 

@@ -114,7 +114,7 @@ public sealed class WbsktClientTests
         await client.StartAsync();
 
         var error = await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        error.Should().BeOfType<ClientAuthThrottledException>().Which.RetryAfter.Should().Be(TimeSpan.FromSeconds(7));
+        error.Should().BeOfType<WbsktConnectException>().Which.RetryAfter.Should().Be(TimeSpan.FromSeconds(7));
     }
 
     [Fact]
@@ -201,6 +201,37 @@ public sealed class WbsktClientTests
         server.Received.Where(frame => frame.GetProperty("type").GetString() == "state.report")
             .Select(frame => frame.GetProperty("payload").GetProperty("celsius").GetDouble())
             .Should().Equal(20.0, 21.0);
+    }
+
+    [Fact]
+    public async Task A_refused_registration_says_why()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        using var api = new HttpListener();
+        api.Prefixes.Add($"http://127.0.0.1:{port}/");
+        api.Start();
+        _ = Task.Run(async () =>
+        {
+            var context = await api.GetContextAsync();
+            context.Response.StatusCode = 404;
+            context.Response.ContentType = "application/problem+json";
+            await context.Response.OutputStream.WriteAsync("{\"title\":\"Not Found\",\"code\":\"POLICY_NOT_FOUND\",\"detail\":\"Invalid registration PIN.\"}"u8.ToArray());
+            context.Response.Close();
+        });
+        await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), new MemoryStorage());
+        var failed = new TaskCompletionSource<Exception>();
+        client.OnConnectFailed += error => failed.TrySetResult(error);
+
+        await client.StartAsync();
+
+        var refusal = (await failed.Task.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeOfType<WbsktConnectException>().Subject;
+        refusal.Step.Should().Be(ConnectStep.Registration);
+        refusal.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        refusal.Code.Should().Be("POLICY_NOT_FOUND");
+        refusal.Message.Should().Be("Registration answered 404 POLICY_NOT_FOUND: Invalid registration PIN.");
     }
 
     private static WbsktClient NewClient(string? pin = "pin") =>

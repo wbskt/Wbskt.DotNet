@@ -30,8 +30,8 @@ public interface IWbsktClient : IAsyncDisposable
 
     /// <summary>
     /// A connection attempt failed, with the exception that stopped it: an unreachable URL or a TLS error,
-    /// or a refused registration or login (a wrong PIN, a full policy, approval pending, a disabled
-    /// client), for now told apart only by its message. Raised for every attempt; the client keeps
+    /// or a <see cref="WbsktConnectException"/> for a refused registration or login (a wrong PIN, a full
+    /// policy, approval pending, a disabled client), carrying the HTTP status and the server's code. Raised for every attempt; the client keeps
     /// retrying on its schedule, except after a <see cref="RegistrationRequiredException"/> (no saved
     /// credentials and no PIN) or a <see cref="CredentialsRejectedException"/> (the client was deleted or
     /// its secret rotated), when it stops for good: fix the cause, dispose it and create a new client.
