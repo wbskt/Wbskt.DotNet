@@ -12,6 +12,10 @@ dotnet add package Wbskt --prerelease
 
 This is a 0.9 beta (`--prerelease` finds it): the client protocol it speaks may still change before 1.0.
 
+It runs on .NET 10. .NET 8 is best effort: Microsoft's support for it ended on 10 November 2026, but
+Ubuntu and RHEL still patch the runtime they package, so the package keeps a net8.0 build and CI still
+tests it. It will be dropped in a minor release, with a note here, once that stops.
+
 ```csharp
 using Wbskt;
 

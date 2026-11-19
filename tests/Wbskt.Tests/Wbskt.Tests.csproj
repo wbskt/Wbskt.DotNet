@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Both of the package's targets: net8.0 is what most boards run. -->
+    <!-- Both of the package's targets, so the best-effort net8.0 build is still tested. -->
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
