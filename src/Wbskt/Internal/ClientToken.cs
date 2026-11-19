@@ -38,13 +38,3 @@ internal sealed class ClientTokenCache
 
     public void Invalidate() => _token = null;
 }
-
-/// <summary>
-/// The client registration or login answered 429; <see cref="RetryAfter"/> is the host's <c>Retry-After</c>,
-/// when it sent one.
-/// </summary>
-internal sealed class ClientAuthThrottledException(string step, TimeSpan? retryAfter)
-    : Exception($"Client {step} was rate limited.")
-{
-    public TimeSpan? RetryAfter { get; } = retryAfter;
-}

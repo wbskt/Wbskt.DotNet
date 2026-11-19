@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Security;
 using System.Text.Json;
 
 namespace Wbskt.Internal;
@@ -20,14 +19,9 @@ internal sealed class AuthClient : IDisposable
     {
         var response = await _httpClient.PostAsJsonAsync("api/v1/client-registrations/initiate", new ClientRegistrationRequest(pin, _config.ClientName));
 
-        if (response.StatusCode == HttpStatusCode.TooManyRequests)
-        {
-            throw new ClientAuthThrottledException("registration", RetryAfter(response));
-        }
-
         if (!response.IsSuccessStatusCode)
         {
-            throw new SecurityException("Failed to register client using PIN.");
+            throw await RefusedAsync(ConnectStep.Registration, response);
         }
 
         var result = await response.Content.ReadFromJsonAsync<ClientRegistrationResponse>();
@@ -38,19 +32,12 @@ internal sealed class AuthClient : IDisposable
     {
         var response = await _httpClient.PostAsJsonAsync("api/v1/client-auth/login", new ClientLoginRequest(clientRefId, secret));
 
-        if (response.StatusCode == HttpStatusCode.TooManyRequests)
-        {
-            throw new ClientAuthThrottledException("login", RetryAfter(response));
-        }
-
-        if (response.StatusCode == HttpStatusCode.Unauthorized && await ErrorCodeAsync(response) == ClientErrorCodes.Unauthorized)
-        {
-            throw new CredentialsRejectedException(clientRefId);
-        }
-
         if (!response.IsSuccessStatusCode)
         {
-            throw new SecurityException("Failed to authenticate client.");
+            var refusal = await RefusedAsync(ConnectStep.Login, response);
+            throw refusal is { StatusCode: HttpStatusCode.Unauthorized, Code: ClientErrorCodes.Unauthorized }
+                ? new CredentialsRejectedException(clientRefId)
+                : refusal;
         }
 
         var result = await response.Content.ReadFromJsonAsync<ClientLoginResponse>();
@@ -59,22 +46,31 @@ internal sealed class AuthClient : IDisposable
             : throw new InvalidOperationException("Invalid login response.");
     }
 
-    private static async Task<string?> ErrorCodeAsync(HttpResponseMessage response)
+    /// <summary>The refusal with the server's Problem Details <c>code</c> and <c>detail</c> (or <c>title</c>).</summary>
+    private static async Task<WbsktConnectException> RefusedAsync(ConnectStep step, HttpResponseMessage response)
     {
+        string? code = null;
+        string? detail = null;
         try
         {
             using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            return body.RootElement.ValueKind == JsonValueKind.Object
-                   && body.RootElement.TryGetProperty("code", out var code)
-                   && code.ValueKind == JsonValueKind.String
-                ? code.GetString()
-                : null;
+            if (body.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                code = StringProperty(body.RootElement, "code");
+                detail = StringProperty(body.RootElement, "detail") ?? StringProperty(body.RootElement, "title");
+            }
         }
         catch (JsonException)
         {
-            return null;
+            // Not Problem Details (a proxy's error page): the status says enough.
         }
+
+        var retryAfter = response.StatusCode == HttpStatusCode.TooManyRequests ? RetryAfter(response) : null;
+        return new WbsktConnectException(step, response.StatusCode, code, detail, retryAfter);
     }
+
+    private static string? StringProperty(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static TimeSpan? RetryAfter(HttpResponseMessage response)
     {

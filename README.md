@@ -79,10 +79,21 @@ it an `async` lambda: that is `async void`, and an exception after its first `aw
 process. `OnConnected`, `OnDisconnected` and `OnSuperseded` are guarded the same way: the client
 still announces itself and reconnects.
 
-**Not connecting?** `OnConnectFailed` is raised with the exception for every failed attempt (an
-unreachable URL, TLS, or a refused registration or login, for now told apart only by its message),
-while the client keeps retrying. With no saved credentials and no PIN it is raised with
+**Not connecting?** `OnConnectFailed` is raised with the exception for every failed attempt while the
+client keeps retrying. A refused registration or login is a `WbsktConnectException` with the `Step`,
+the `StatusCode`, the server's `Code` and its message, for example
+`Registration answered 404 POLICY_NOT_FOUND: Invalid registration PIN.`; a 429 also carries
+`RetryAfter`. An unreachable URL or a TLS error arrives as the `HttpRequestException` or
+`WebSocketException` .NET raised. With no saved credentials and no PIN it is raised with
 `RegistrationRequiredException`, and the client stops for good: dispose it and create a new one with a PIN.
+
+| `Code` | Why, and what to do |
+|---|---|
+| `POLICY_NOT_FOUND` (404) | The PIN matches no policy. Check it in the console (Policies). |
+| `POLICY_DISABLED` (403) | The policy is turned off. Turn it on; the client retries. |
+| `POLICY_LIMIT_REACHED` (400), `PLAN_CLIENT_LIMIT_REACHED` (409) | The policy or the plan is full. Remove a client you no longer use. |
+| `CLIENT_NOT_REGISTERED` (401) | Waiting for approval, or revoked or rejected. Approve it in the console; the client retries. |
+| `CLIENT_UNAUTHORIZED` (401) | Deleted or secret rotated: a `CredentialsRejectedException`, below. |
 
 **Secret rotated or client deleted.** When someone rotates the client's secret or deletes the client in
 the console, login refuses the saved credentials. `StartAsync` throws (or `OnConnectFailed` is raised
