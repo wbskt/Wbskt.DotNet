@@ -186,11 +186,12 @@ public sealed class WbsktClient : IWbsktClient
     internal const int MaxClientNameLength = 100;
 
     // Refused here, where the mistake is made: every one of these would otherwise be retried for ever.
+    // The name is counted trimmed, as the server counts it.
     private static void Validate(ClientConfig config)
     {
-        if (string.IsNullOrWhiteSpace(config.ClientName) || config.ClientName.Length > MaxClientNameLength)
+        if (string.IsNullOrWhiteSpace(config.ClientName) || config.ClientName.Trim().Length > MaxClientNameLength)
         {
-            throw new ArgumentException($"ClientName must be 1-{MaxClientNameLength} characters.", nameof(config));
+            throw new ArgumentException($"ClientName must be 1-{MaxClientNameLength} characters once trimmed.", nameof(config));
         }
 
         if (!IsAbsolute(config.BaseApiUrl, Uri.UriSchemeHttp, Uri.UriSchemeHttps))

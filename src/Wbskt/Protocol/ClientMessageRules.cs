@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Wbskt.Internal;
 
-/// <summary>Which message types an app may send: 1-64 characters and not one the protocol reserves.</summary>
+/// <summary>Which message types an app may send: 1 to <see cref="MaxTypeLength"/> characters and not one the protocol reserves.</summary>
 internal static class ClientMessageRules
 {
     public const int MaxTypeLength = MessageTypes.MaxTypeLength;
