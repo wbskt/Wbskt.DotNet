@@ -114,6 +114,12 @@ await storage.SaveCredentialsAsync(clientRefId!.Value, "the-new-secret");
 To register again on purpose (the client was deleted, or you point it at a fresh install), call
 `ClearCredentialsAsync()` on the storage or delete the file; the next start registers with the PIN.
 
+**Credentials can't be saved.** If the client registers but its storage can't write the credentials
+(a read-only folder, a folder owned by another user), `StartAsync` throws (or `OnConnectFailed` is
+raised with) `CredentialsNotSavedException`, naming the new client and the storage error, and the client
+stops. It doesn't retry, because every retry would register another client until the policy was full.
+Fix the folder and start again, and remove the extra client in the console.
+
 **Message size.** A message over 64 KB once serialised throws `ArgumentException` from `SendAsync` or
 `ReportStateAsync`; send a link to anything bigger.
 

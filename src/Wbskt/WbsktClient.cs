@@ -83,8 +83,8 @@ public sealed class WbsktClient : IWbsktClient
     /// <summary>
     /// Makes the first connection attempt and returns once it has finished, connected or not. A
     /// failed attempt is raised on <see cref="OnConnectFailed"/> and retried in the background; only
-    /// <see cref="RegistrationRequiredException"/> and <see cref="CredentialsRejectedException"/> are
-    /// thrown, because no retry can fix them.
+    /// <see cref="RegistrationRequiredException"/>, <see cref="CredentialsRejectedException"/> and
+    /// <see cref="CredentialsNotSavedException"/> are thrown, because no retry can fix them.
     /// </summary>
     public async Task StartAsync()
     {
@@ -123,7 +123,7 @@ public sealed class WbsktClient : IWbsktClient
             // 1. Resolve Credentials (Load or Register) if not already done
             if (!_resolvedRefId.HasValue)
             {
-                (_resolvedRefId, _resolvedSecret) = await ResolveCredentialsAsync();
+                await ResolveCredentialsAsync();
             }
 
             // 2. Obtain JWT, reusing the last one while it is still valid
@@ -240,7 +240,7 @@ public sealed class WbsktClient : IWbsktClient
             }
             catch (Exception ex) when (IsFinal(ex))
             {
-                // No credentials and no PIN, or credentials login refused for good: no retry can fix either.
+                // No credentials and no PIN, credentials refused for good, or new ones not saved: no retry can fix them.
                 RaiseConnectFailed(ex);
                 Volatile.Write(ref _started, 0);
                 return;
@@ -253,7 +253,8 @@ public sealed class WbsktClient : IWbsktClient
         }
     }
 
-    private static bool IsFinal(Exception error) => error is RegistrationRequiredException or CredentialsRejectedException;
+    private static bool IsFinal(Exception error) =>
+        error is RegistrationRequiredException or CredentialsRejectedException or CredentialsNotSavedException;
 
     private void RaiseConnectFailed(Exception error)
     {
@@ -370,13 +371,15 @@ public sealed class WbsktClient : IWbsktClient
         await EnqueueAsync(MessageTypes.StateReport, patch, nameof(patch));
     }
 
-    private async Task<(Guid RefId, string Secret)> ResolveCredentialsAsync()
+    private async Task ResolveCredentialsAsync()
     {
         var (savedId, savedSecret) = await _storage.LoadCredentialsAsync();
 
         if (savedId.HasValue && !string.IsNullOrEmpty(savedSecret))
         {
-            return (savedId.Value, savedSecret);
+            _resolvedSecret = savedSecret;
+            _resolvedRefId = savedId.Value;
+            return;
         }
 
         if (string.IsNullOrEmpty(_config.PolicyPin))
@@ -385,9 +388,18 @@ public sealed class WbsktClient : IWbsktClient
         }
 
         var (newId, newSecret) = await _auth.RegisterAsync(_config.PolicyPin);
-        await _storage.SaveCredentialsAsync(newId, newSecret);
-        
-        return (newId, newSecret);
+
+        // Kept before saving, so this process never registers twice even when the save fails.
+        _resolvedSecret = newSecret;
+        _resolvedRefId = newId;
+        try
+        {
+            await _storage.SaveCredentialsAsync(newId, newSecret);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new CredentialsNotSavedException(newId, ex);
+        }
     }
 
     public async ValueTask DisposeAsync()
