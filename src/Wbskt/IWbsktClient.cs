@@ -49,6 +49,12 @@ public interface IWbsktClient : IAsyncDisposable
     /// <summary>Messages waiting in the offline buffer.</summary>
     int PendingMessageCount { get; }
 
+    /// <summary>
+    /// Messages the offline buffer has dropped since the client was built, oldest first, to make room for newer
+    /// ones while it was full.
+    /// </summary>
+    long DroppedMessageCount { get; }
+
     /// <summary>Connected, with the client's capabilities sent, so a message sent now goes straight out.</summary>
     bool IsConnected { get; }
 

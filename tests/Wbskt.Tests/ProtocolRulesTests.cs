@@ -27,7 +27,7 @@ public sealed class ProtocolRulesTests
     public void The_types_the_server_reads_from_clients_cannot_be_sent_to_one(string type)
     {
         Assert.False(MessageTypes.IsSystem(type));
-        Assert.NotNull(ClientMessageRules.FindViolation(type, "{}"));
+        Assert.NotNull(ClientMessageRules.FindViolation(type));
     }
 
     [Theory]
@@ -35,14 +35,7 @@ public sealed class ProtocolRulesTests
     [InlineData("system.reboot")]
     public void An_ordinary_type_may_be_sent(string type)
     {
-        Assert.Null(ClientMessageRules.FindViolation(type, "{}"));
-    }
-
-    [Fact]
-    public void A_payload_is_capped_at_half_a_socket_message()
-    {
-        Assert.Equal(ClientProtocol.MaxMessageBytes / 2, ClientMessageRules.MaxPayloadChars);
-        Assert.NotNull(ClientMessageRules.FindViolation("led.set", new string('x', ClientMessageRules.MaxPayloadChars + 1)));
+        Assert.Null(ClientMessageRules.FindViolation(type));
     }
 
     [Fact]

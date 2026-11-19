@@ -29,7 +29,4 @@ internal static class ClientErrorCodes
 {
     /// <summary>Unknown client or wrong secret. The credentials will never work again.</summary>
     public const string Unauthorized = "CLIENT_UNAUTHORIZED";
-
-    /// <summary>Approval is still pending. Keep the credentials and retry.</summary>
-    public const string NotRegistered = "CLIENT_NOT_REGISTERED";
 }
