@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- net8.0 for the LTS most boards (Raspberry Pi OS, Debian) ship; net10.0 for the hosts and tests. -->
+    <!-- net10.0 is supported. net8.0 is best effort: Microsoft ended its support on 10 Nov 2026, but distros that
+         boards run (Ubuntu, RHEL) still patch it. It is dropped when that stops or it costs a workaround. -->
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -10,7 +11,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>Wbskt</PackageId>
     <Version>$(SdkPackageVersion)</Version>
-    <Description>Connect a board, script or service to Wbskt: register with a policy PIN, hold a WebSocket open, send readings and receive commands. Buffers while offline and reconnects with jitter.</Description>
+    <Description>Connect a board, script or service to Wbskt: register with a policy PIN, hold a WebSocket open, send readings and receive commands. Buffers while offline and reconnects with jitter. For .NET 10; .NET 8 is best effort.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>icon.png</PackageIcon>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
