@@ -81,7 +81,8 @@ public sealed class WbsktClient : IWbsktClient
     /// <summary>
     /// Makes the first connection attempt and returns once it has finished, connected or not. A
     /// failed attempt is raised on <see cref="OnConnectFailed"/> and retried in the background; only
-    /// <see cref="RegistrationRequiredException"/> is thrown, because no retry can fix it.
+    /// <see cref="RegistrationRequiredException"/> and <see cref="CredentialsRejectedException"/> are
+    /// thrown, because no retry can fix them.
     /// </summary>
     public async Task StartAsync()
     {
@@ -92,7 +93,7 @@ public sealed class WbsktClient : IWbsktClient
         {
             await ConnectInternalAsync();
         }
-        catch (RegistrationRequiredException ex)
+        catch (Exception ex) when (IsFinal(ex))
         {
             RaiseConnectFailed(ex);
             throw;
@@ -117,19 +118,9 @@ public sealed class WbsktClient : IWbsktClient
             }
 
             // 2. Obtain JWT, reusing the last one while it is still valid
-            string token;
-            try
-            {
-                token = await _tokens.GetAsync();
-            }
-            catch (CredentialsRejectedException)
-            {
-                // Deleted, or its secret rotated: these credentials never work again, so register anew.
-                await _storage.ClearCredentialsAsync();
-                _resolvedRefId = null;
-                _resolvedSecret = null;
-                throw;
-            }
+            // Throws CredentialsRejectedException when the client was deleted or its secret rotated. The
+            // credentials are kept: registering again would bring a deleted device back as a new client.
+            var token = await _tokens.GetAsync();
 
             // 3. Connect to real-time gateway
             Interlocked.Increment(ref _connection);
@@ -232,9 +223,9 @@ public sealed class WbsktClient : IWbsktClient
                 await ConnectInternalAsync();
                 failures = 0;
             }
-            catch (RegistrationRequiredException ex)
+            catch (Exception ex) when (IsFinal(ex))
             {
-                // The saved credentials were rejected and there is no PIN to register with again: no retry can fix it.
+                // No credentials and no PIN, or credentials login refused for good: no retry can fix either.
                 RaiseConnectFailed(ex);
                 return;
             }
@@ -245,6 +236,8 @@ public sealed class WbsktClient : IWbsktClient
             }
         }
     }
+
+    private static bool IsFinal(Exception error) => error is RegistrationRequiredException or CredentialsRejectedException;
 
     private void RaiseConnectFailed(Exception error)
     {

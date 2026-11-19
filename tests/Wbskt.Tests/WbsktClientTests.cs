@@ -117,8 +117,67 @@ public sealed class WbsktClientTests
         error.Should().BeOfType<ClientAuthThrottledException>().Which.RetryAfter.Should().Be(TimeSpan.FromSeconds(7));
     }
 
+    [Fact]
+    public async Task Rejected_credentials_are_kept_and_stop_the_client_instead_of_registering_again()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        using var api = new HttpListener();
+        api.Prefixes.Add($"http://127.0.0.1:{port}/");
+        api.Start();
+        var paths = new List<string>();
+        _ = Task.Run(async () =>
+        {
+            while (api.IsListening)
+            {
+                var context = await api.GetContextAsync();
+                lock (paths)
+                {
+                    paths.Add(context.Request.Url!.AbsolutePath);
+                }
+
+                context.Response.StatusCode = 401;
+                context.Response.ContentType = "application/problem+json";
+                await context.Response.OutputStream.WriteAsync("{\"code\":\"CLIENT_UNAUTHORIZED\"}"u8.ToArray());
+                context.Response.Close();
+            }
+        });
+        var refId = Guid.NewGuid();
+        var storage = new SavedStorage(refId, "old-secret");
+        await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), storage);
+        Exception? raised = null;
+        client.OnConnectFailed += error => raised = error;
+
+        var start = () => client.StartAsync();
+
+        (await start.Should().ThrowAsync<CredentialsRejectedException>()).Which.ClientRefId.Should().Be(refId);
+        raised.Should().BeOfType<CredentialsRejectedException>();
+        storage.Cleared.Should().BeFalse();
+        lock (paths)
+        {
+            paths.Should().Equal("/api/v1/client-auth/login");
+        }
+    }
+
     private static WbsktClient NewClient(string? pin = "pin") =>
         new(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", pin), new MemoryStorage());
+
+    private sealed class SavedStorage(Guid refId, string secret) : IClientStorage
+    {
+        public bool Cleared { get; private set; }
+
+        public Task SaveCredentialsAsync(Guid id, string value) => Task.CompletedTask;
+
+        public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult<(Guid?, string?)>((refId, secret));
+
+        public Task ClearCredentialsAsync()
+        {
+            Cleared = true;
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class MemoryStorage : IClientStorage
     {

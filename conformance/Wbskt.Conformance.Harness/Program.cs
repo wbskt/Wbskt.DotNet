@@ -49,7 +49,16 @@ client.OnMessageReceived += (type, payload, commandId) =>
 client.OnHandlerError += error => Emit("handler-error", new() { ["reason"] = error.Message });
 
 await client.UpdateCapabilitiesAsync(new ClientCapabilities("", "", "", commands));
-await client.StartAsync();
+try
+{
+    await client.StartAsync();
+}
+catch (Exception ex) when (ex is RegistrationRequiredException or CredentialsRejectedException)
+{
+    // The client stopped for good; the suite checks what it did (and didn't) send before that.
+    Emit("failed", new() { ["reason"] = ex.Message });
+}
+
 Emit("started");
 
 while (await Console.In.ReadLineAsync() is { } line)
