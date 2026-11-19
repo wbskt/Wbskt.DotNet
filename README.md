@@ -13,20 +13,15 @@ dotnet add package Wbskt --prerelease
 This is a 0.9 beta (`--prerelease` finds it): the client protocol it speaks may still change before 1.0.
 
 ```csharp
-using System.Text.Json;
 using Wbskt;
 
 await using var wbskt = new WbsktClient("greenhouse-sensor", "your-policy-pin");
 
 wbskt.MessageHandler = async (message, cancellationToken) =>
 {
-    // The payload is a JsonElement (null when there was none): read it, or Deserialize<T>() it.
-    if (message.Type == "led.set"
-        && message.Payload is { ValueKind: JsonValueKind.Object } payload
-        && payload.TryGetProperty("on", out var on)
-        && on.ValueKind is JsonValueKind.True or JsonValueKind.False)
+    if (message.Type == "led.set" && message.PayloadAs<LedSet>() is { } led)
     {
-        await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["led"] = on.GetBoolean() });
+        await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["led"] = led.On });
     }
 };
 
@@ -38,10 +33,13 @@ await wbskt.StartAsync();
 // Keep the program running: when it ends, the client is disposed and goes offline.
 while (!stop.IsCancellationRequested)
 {
-    await wbskt.SendAsync("temperature", new { celsius = 21.5 });
+    await wbskt.SendAsync("temperature", new Reading(21.5)); // {"celsius":21.5}
     await wbskt.ReportStateAsync(new Dictionary<string, object?> { ["celsius"] = 21.5 });
     await Task.Delay(TimeSpan.FromSeconds(10), stop.Token).ContinueWith(_ => { });
 }
+
+record LedSet(bool On);
+record Reading(double Celsius);
 ```
 
 `StartAsync` returns once the first connection attempt has finished; the client then runs in the
@@ -63,6 +61,10 @@ await using var wbskt = new WbsktClient(config, new FileClientStorage("/etc/wbsk
 **Commands.** Declare the commands the client takes with `UpdateCapabilitiesAsync` and they show up
 in the console's send panel. Delivery acks and expired-command refusals are sent for you.
 
+**Property names.** Payloads go out with camelCase property names (`Celsius` is sent as `celsius`),
+as the Python and Arduino clients send them, so a workflow reading `payload.celsius` works for every
+client. Dictionary keys go out exactly as given. Earlier betas sent property names as declared.
+
 **Offline.** `SendAsync` while disconnected queues the message (1,000 by default,
 `ClientConfig.OfflineBufferSize`) and sends it in order, with its original time, on reconnect. Sends
 are paced at 8 a second after a burst of 50, under the gateway's limit, so a full buffer takes about
@@ -70,7 +72,8 @@ two minutes to drain.
 
 **Handlers.** Messages reach `MessageHandler` one at a time, in order, on the SDK's own task: each
 call is awaited before the next message is handed over, and a slow handler doesn't delay the
-connection's pings. The payload is a `JsonElement`. Pass the token on to anything slow: it is
+connection's pings. The payload is a `JsonElement`; `PayloadAs<T>()` reads it into your own type,
+matching property names ignoring case. Pass the token on to anything slow: it is
 cancelled when the client is disposed, and no further message is handed over after that. Don't wait
 inside a handler for a later message; it can't arrive until the handler returns. A handler that
 throws, before or after an `await`, doesn't drop the connection; the exception is raised on
