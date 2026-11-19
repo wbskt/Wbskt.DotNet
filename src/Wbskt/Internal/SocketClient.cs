@@ -69,7 +69,7 @@ internal sealed class SocketClient : IAsyncDisposable
 
         // The last connection's receive loop answers the server's close and reports the drop; let it finish on
         // its own socket first, so neither lands on the new connection.
-        await _receive.WaitAsync(CloseTimeout).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        await WaitForDropAsync();
         Abort(_webSocket);
 
         // Reset state for new connection
@@ -116,6 +116,13 @@ internal sealed class SocketClient : IAsyncDisposable
         var socket = _webSocket;
         _receive = Task.Run(() => ReceiveLoopAsync(socket), _cts.Token);
     }
+
+    /// <summary>
+    /// Waits, briefly, for the last connection's receive loop to finish, so <see cref="LastClose"/> holds why it
+    /// ended: the socket reads as closed a moment before the loop records the close code.
+    /// </summary>
+    public async Task WaitForDropAsync() =>
+        await _receive.WaitAsync(CloseTimeout).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
     /// <summary>
     /// Ends the connection with a normal close (1000), so the gateway records a clean stop rather than a
