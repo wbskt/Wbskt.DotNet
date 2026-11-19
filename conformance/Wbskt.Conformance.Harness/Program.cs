@@ -39,13 +39,17 @@ await using var client = new WbsktClient(config, new FileClientStorage(Env("WBSK
 client.OnConnected += () => Emit("connected");
 client.OnDisconnected += () => Emit("disconnected");
 var throwNext = 0;
-client.OnMessageReceived += (type, payload, commandId) =>
+
+// MessageHandler, the way the README tells apps to handle messages.
+client.MessageHandler = (message, _) =>
 {
-    Emit("message", new() { ["type"] = type, ["payload"] = payload, ["commandId"] = commandId });
+    Emit("message", new() { ["type"] = message.Type, ["payload"] = message.Payload, ["commandId"] = message.CommandId });
     if (Interlocked.Exchange(ref throwNext, 0) == 1)
     {
         throw new InvalidOperationException("thrown by the harness");
     }
+
+    return Task.CompletedTask;
 };
 client.OnHandlerError += error => Emit("handler-error", new() { ["reason"] = error.Message });
 
