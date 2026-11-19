@@ -44,8 +44,16 @@ internal sealed class FakeWbskt : IAsyncDisposable
     /// <summary>The close status each client sent, in order; a link dropped without a close is not here.</summary>
     public ConcurrentQueue<WebSocketCloseStatus?> Closes { get; } = new();
 
-    public WbsktClient NewClient() =>
-        new(new ClientConfig(Url, SocketUrl, "test", "pin"), new SavedStorage(Guid.NewGuid(), "secret"));
+    public WbsktClient NewClient() => NewClient(new ClientConfig(Url, SocketUrl, "test", "pin"));
+
+    /// <summary>A client that reconnects at once, so a test of a dropped connection doesn't wait out the jitter.</summary>
+    public WbsktClient NewClient(ClientConfig config) =>
+        new(config, new SavedStorage(Guid.NewGuid(), "secret")) { Reconnect = new ReconnectPolicy(new NoJitter()) };
+
+    private sealed class NoJitter : Random
+    {
+        public override double NextDouble() => 0;
+    }
 
     /// <summary>Waits until a frame of <paramref name="type"/> has arrived.</summary>
     public async Task<JsonElement> WaitForAsync(string type, TimeSpan? timeout = null)

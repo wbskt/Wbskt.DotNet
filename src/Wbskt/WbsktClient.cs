@@ -12,7 +12,7 @@ public sealed class WbsktClient : IWbsktClient
     private readonly SemaphoreSlim _flushLock = new(1, 1);
     private readonly TokenBucket _pacer = new(ClientProtocol.SendPerSecond, ClientProtocol.SendBurst);
     private readonly CancellationTokenSource _cts = new();
-    private readonly ReconnectPolicy _reconnect = new();
+    internal ReconnectPolicy Reconnect { get; init; } = new();
     private readonly ClientTokenCache _tokens;
 
     /// <summary>How often a connected client checks whether its socket is still open.</summary>
@@ -327,7 +327,7 @@ public sealed class WbsktClient : IWbsktClient
                     Handlers.Raise(OnSuperseded, OnHandlerError);
                 }
 
-                await Task.Delay(_reconnect.FirstDelay(close), run);
+                await Task.Delay(Reconnect.FirstDelay(close), run);
                 if (_socket.IsConnected)
                 {
                     continue;
@@ -373,8 +373,8 @@ public sealed class WbsktClient : IWbsktClient
 
     private TimeSpan FailureDelay(Exception error, int failures) =>
         error is WbsktConnectException { IsThrottled: true, RetryAfter: { } retryAfter }
-            ? _reconnect.AfterThrottle(retryAfter)
-            : _reconnect.RetryDelay(failures);
+            ? Reconnect.AfterThrottle(retryAfter)
+            : Reconnect.RetryDelay(failures);
 
     /// <exception cref="ArgumentException">The capabilities are over 64 KB once serialised.</exception>
     public async Task UpdateCapabilitiesAsync(ClientCapabilities capabilities)

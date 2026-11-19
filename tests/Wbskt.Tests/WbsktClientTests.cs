@@ -199,6 +199,77 @@ public sealed class WbsktClientTests
     }
 
     [Fact]
+    public async Task Capabilities_go_out_first_then_what_was_sent_while_offline_in_order()
+    {
+        await using var server = new FakeWbskt();
+        await using var client = server.NewClient(new ClientConfig(server.Url, server.SocketUrl, "test", "pin")
+        {
+            FirmwareVersion = "1.4.0",
+            Commands = [new CommandCapability("led.set", "", [new PropertySchema("on", DataType.Boolean)])],
+        });
+
+        await client.SendAsync("reading", 1);
+        await client.SendAsync("reading", 2);
+        await client.StartAsync();
+        await server.WaitForCountAsync("reading", 2);
+
+        var frames = server.Received.ToArray();
+        frames[0].GetProperty("type").GetString().Should().Be("capabilities");
+        var capabilities = frames[0].GetProperty("payload");
+        capabilities.GetProperty("firmwareVersion").GetString().Should().Be("1.4.0");
+        capabilities.GetProperty("capabilities")[0].GetProperty("parameters")[0].GetProperty("dataType").GetString().Should().Be("boolean");
+        frames.Skip(1).Select(frame => frame.GetProperty("payload").GetInt32()).Should().Equal(1, 2);
+        client.IsConnected.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task A_dropped_connection_comes_back_announces_again_and_sends_what_waited()
+    {
+        await using var server = new FakeWbskt();
+        await using var client = server.NewClient();
+        var disconnected = new TaskCompletionSource();
+        client.OnDisconnected += () => disconnected.TrySetResult();
+        await client.StartAsync();
+        await server.WaitForAsync("capabilities");
+
+        await server.Sockets.Single().CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "Restarting", CancellationToken.None);
+        await disconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await client.SendAsync("reading", 7);
+        await server.WaitForCountAsync("capabilities", 2);
+
+        var reading = await server.WaitForAsync("reading");
+        reading.GetProperty("payload").GetInt32().Should().Be(7);
+        server.Closes.Should().Equal(WebSocketCloseStatus.NormalClosure);
+        server.Sockets.Should().HaveCount(2);
+        server.Sockets.Last().State.Should().Be(WebSocketState.Open);
+        client.IsConnected.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task A_command_is_acked_and_reaches_the_message_handler()
+    {
+        await using var server = new FakeWbskt();
+        await using var client = server.NewClient();
+        var handled = new TaskCompletionSource<WbsktMessage>();
+        client.MessageHandler = (message, _) =>
+        {
+            handled.TrySetResult(message);
+            return Task.CompletedTask;
+        };
+        await client.StartAsync();
+        await server.WaitForAsync("capabilities");
+
+        await server.Sockets.Single().SendAsync(
+            """{"type":"led.set","payload":{"on":true},"commandId":"c-1"}"""u8.ToArray(), WebSocketMessageType.Text, true, CancellationToken.None);
+
+        var message = await handled.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        message.CommandId.Should().Be("c-1");
+        message.PayloadAs<LedSet>()!.On.Should().BeTrue();
+        var ack = await server.WaitForAsync("sys.ack");
+        ack.GetProperty("payload").GetProperty("commandId").GetString().Should().Be("c-1");
+    }
+
+    [Fact]
     public async Task Disposing_closes_the_connection_normally()
     {
         await using var server = new FakeWbskt();
@@ -434,4 +505,6 @@ public sealed class WbsktClientTests
 
         public Task ClearCredentialsAsync() => Task.CompletedTask;
     }
+
+    private sealed record LedSet(bool On);
 }
