@@ -145,7 +145,7 @@ public sealed class WbsktClientTests
             }
         });
         var refId = Guid.NewGuid();
-        var storage = new SavedStorage(refId, "old-secret");
+        var storage = new FakeWbskt.SavedStorage(refId, "old-secret");
         await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), storage);
         Exception? raised = null;
         client.OnConnectFailed += error => raised = error;
@@ -161,23 +161,29 @@ public sealed class WbsktClientTests
         }
     }
 
+    [Fact]
+    public async Task Starting_again_while_connected_changes_nothing_and_sends_still_go_out()
+    {
+        await using var server = new FakeWbskt();
+        await using var client = server.NewClient();
+        var connected = new TaskCompletionSource();
+        client.OnConnected += () => connected.TrySetResult();
+
+        await client.StartAsync();
+        await connected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await server.WaitForAsync("capabilities");
+        await client.StartAsync();
+        await client.SendAsync("reading", new { celsius = 21.5 });
+
+        var reading = await server.WaitForAsync("reading");
+        reading.GetProperty("payload").GetProperty("celsius").GetDouble().Should().Be(21.5);
+        client.PendingMessageCount.Should().Be(0);
+        server.Sockets.Should().HaveCount(1);
+        server.Logins.Should().Be(1);
+    }
+
     private static WbsktClient NewClient(string? pin = "pin") =>
         new(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", pin), new MemoryStorage());
-
-    private sealed class SavedStorage(Guid refId, string secret) : IClientStorage
-    {
-        public bool Cleared { get; private set; }
-
-        public Task SaveCredentialsAsync(Guid id, string value) => Task.CompletedTask;
-
-        public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult<(Guid?, string?)>((refId, secret));
-
-        public Task ClearCredentialsAsync()
-        {
-            Cleared = true;
-            return Task.CompletedTask;
-        }
-    }
 
     private sealed class MemoryStorage : IClientStorage
     {

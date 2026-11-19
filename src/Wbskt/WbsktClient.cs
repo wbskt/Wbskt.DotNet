@@ -27,6 +27,8 @@ public sealed class WbsktClient : IWbsktClient
     private string? _resolvedSecret;
     private ClientCapabilities? _lastCapabilities;
     private int _disposed;
+    // 1 while started: from StartAsync until the client stops for good or is disposed.
+    private int _started;
 
     public event Action<string, object?, string?>? OnMessageReceived;
 
@@ -86,6 +88,12 @@ public sealed class WbsktClient : IWbsktClient
     /// </summary>
     public async Task StartAsync()
     {
+        // A second call while started would start a second reconnect loop racing the first.
+        if (Interlocked.CompareExchange(ref _started, 1, 0) == 1)
+        {
+            return;
+        }
+
         _shouldReconnect = true;
         var failures = 0;
         TimeSpan? retryIn = null;
@@ -96,6 +104,7 @@ public sealed class WbsktClient : IWbsktClient
         catch (Exception ex) when (IsFinal(ex))
         {
             RaiseConnectFailed(ex);
+            Volatile.Write(ref _started, 0);
             throw;
         }
         catch (Exception ex)
@@ -123,7 +132,6 @@ public sealed class WbsktClient : IWbsktClient
             var token = await _tokens.GetAsync();
 
             // 3. Connect to real-time gateway
-            Interlocked.Increment(ref _connection);
             try
             {
                 await _socket.ConnectAsync(token);
@@ -143,15 +151,18 @@ public sealed class WbsktClient : IWbsktClient
 
     private void HandleConnected()
     {
+        // Counted here, when a socket really opened: a connect that found one already open must not
+        // count, or the open connection would never count as announced and nothing would be sent.
+        var connection = Interlocked.Increment(ref _connection);
+
         // Always advertise SDK metadata (merged with any app-declared commands) on every successful
         // connection, before the app hears of it, so a handler that throws cannot hold it back.
-        _ = AnnounceCapabilitiesAsync();
+        _ = AnnounceCapabilitiesAsync(connection);
         Handlers.Raise(OnConnected, OnHandlerError);
     }
 
-    private async Task AnnounceCapabilitiesAsync()
+    private async Task AnnounceCapabilitiesAsync(int connection)
     {
-        var connection = Volatile.Read(ref _connection);
         try
         {
             // Capabilities describe the connection, so they go out first and are never buffered.
@@ -216,6 +227,10 @@ public sealed class WbsktClient : IWbsktClient
                 }
 
                 await Task.Delay(_reconnect.FirstDelay(close), _cts.Token);
+                if (_socket.IsConnected)
+                {
+                    continue;
+                }
             }
 
             try
@@ -227,6 +242,7 @@ public sealed class WbsktClient : IWbsktClient
             {
                 // No credentials and no PIN, or credentials login refused for good: no retry can fix either.
                 RaiseConnectFailed(ex);
+                Volatile.Write(ref _started, 0);
                 return;
             }
             catch (Exception ex)
