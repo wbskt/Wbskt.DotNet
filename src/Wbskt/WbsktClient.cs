@@ -33,6 +33,8 @@ public sealed class WbsktClient : IWbsktClient
     private int _announcedConnection = -1;
     private Guid? _resolvedRefId;
     private string? _resolvedSecret;
+    // Registered, but the storage refused the credentials; saved again before the next login.
+    private bool _unsaved;
     private ClientCapabilities? _lastCapabilities;
     private int _disposed;
     // 1 while started: from StartAsync until the client stops for good or is disposed.
@@ -218,11 +220,28 @@ public sealed class WbsktClient : IWbsktClient
         {
             await ResolveCredentialsAsync();
         }
+        else if (_unsaved)
+        {
+            // Connecting with credentials only this process holds would register again after a restart.
+            await SaveCredentialsAsync(_resolvedRefId.Value, _resolvedSecret!);
+        }
 
         // Reuses the last token while it is still valid. Throws CredentialsRejectedException when the client was
         // deleted or its secret rotated; the credentials are kept, as registering again would bring a deleted
         // device back as a new client.
-        var token = await _tokens.GetAsync();
+        string token;
+        try
+        {
+            token = await _tokens.GetAsync();
+        }
+        catch (CredentialsRejectedException)
+        {
+            // Forgotten here but kept in storage, so the next start reads what the app saved or cleared since.
+            _resolvedRefId = null;
+            _resolvedSecret = null;
+            _tokens.Invalidate();
+            throw;
+        }
 
         try
         {
@@ -506,14 +525,22 @@ public sealed class WbsktClient : IWbsktClient
         // Kept before saving, so this process never registers twice even when the save fails.
         _resolvedSecret = newSecret;
         _resolvedRefId = newId;
+        _unsaved = true;
+        await SaveCredentialsAsync(newId, newSecret);
+    }
+
+    private async Task SaveCredentialsAsync(Guid refId, string secret)
+    {
         try
         {
-            await _storage.SaveCredentialsAsync(newId, newSecret);
+            await _storage.SaveCredentialsAsync(refId, secret);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw new CredentialsNotSavedException(newId, ex);
+            throw new CredentialsNotSavedException(refId, ex);
         }
+
+        _unsaved = false;
     }
 
     public async ValueTask DisposeAsync()

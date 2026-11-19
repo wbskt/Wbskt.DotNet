@@ -18,6 +18,7 @@ internal sealed class FakeWbskt : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _serve;
     private int _logins;
+    private int _registrations;
 
     public FakeWbskt()
     {
@@ -37,6 +38,11 @@ internal sealed class FakeWbskt : IAsyncDisposable
 
     public int Logins => Volatile.Read(ref _logins);
 
+    public int Registrations => Volatile.Read(ref _registrations);
+
+    /// <summary>A login with this secret is refused as <c>CLIENT_UNAUTHORIZED</c>, as for a rotated secret.</summary>
+    public string? RefusedSecret { get; set; }
+
     public ConcurrentQueue<WebSocket> Sockets { get; } = new();
 
     public ConcurrentQueue<JsonElement> Received { get; } = new();
@@ -47,8 +53,10 @@ internal sealed class FakeWbskt : IAsyncDisposable
     public WbsktClient NewClient() => NewClient(new ClientConfig(Url, SocketUrl, "test", "pin"));
 
     /// <summary>A client that reconnects at once, so a test of a dropped connection doesn't wait out the jitter.</summary>
-    public WbsktClient NewClient(ClientConfig config) =>
-        new(config, new SavedStorage(Guid.NewGuid(), "secret")) { Reconnect = new ReconnectPolicy(new NoJitter()) };
+    public WbsktClient NewClient(ClientConfig config) => NewClient(config, new SavedStorage(Guid.NewGuid(), "secret"));
+
+    public WbsktClient NewClient(ClientConfig config, IClientStorage storage) =>
+        new(config, storage) { Reconnect = new ReconnectPolicy(new NoJitter()) };
 
     private sealed class NoJitter : Random
     {
@@ -114,7 +122,26 @@ internal sealed class FakeWbskt : IAsyncDisposable
                 continue;
             }
 
+            if (context.Request.Url!.AbsolutePath.EndsWith("/client-registrations/initiate", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref _registrations);
+                context.Response.ContentType = "application/json";
+                await context.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes($"{{\"clientRefId\":\"{Guid.NewGuid()}\",\"secret\":\"registered\"}}"));
+                context.Response.Close();
+                continue;
+            }
+
             Interlocked.Increment(ref _logins);
+            using var login = await JsonDocument.ParseAsync(context.Request.InputStream);
+            if (RefusedSecret is { } refused && login.RootElement.GetProperty("secret").GetString() == refused)
+            {
+                context.Response.StatusCode = 401;
+                context.Response.ContentType = "application/problem+json";
+                await context.Response.OutputStream.WriteAsync("{\"code\":\"CLIENT_UNAUTHORIZED\"}"u8.ToArray());
+                context.Response.Close();
+                continue;
+            }
+
             context.Response.ContentType = "application/json";
             await context.Response.OutputStream.WriteAsync("{\"accessToken\":\"token\",\"expiresIn\":3600}"u8.ToArray());
             context.Response.Close();
@@ -157,17 +184,32 @@ internal sealed class FakeWbskt : IAsyncDisposable
         _cts.Dispose();
     }
 
-    internal sealed class SavedStorage(Guid refId, string secret) : IClientStorage
+    /// <summary>Credentials in memory; <see cref="ReadOnly"/> makes a save fail as a read-only folder would.</summary>
+    internal sealed class SavedStorage(Guid? refId, string? secret) : IClientStorage
     {
         public bool Cleared { get; private set; }
 
-        public Task SaveCredentialsAsync(Guid id, string value) => Task.CompletedTask;
+        public bool ReadOnly { get; set; }
 
-        public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult<(Guid?, string?)>((refId, secret));
+        public (Guid? RefId, string? Secret) Saved { get; private set; } = (refId, secret);
+
+        public Task SaveCredentialsAsync(Guid id, string value)
+        {
+            if (ReadOnly)
+            {
+                throw new UnauthorizedAccessException("Access to the path '/data/wbskt/test.json' is denied.");
+            }
+
+            Saved = (id, value);
+            return Task.CompletedTask;
+        }
+
+        public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult(Saved);
 
         public Task ClearCredentialsAsync()
         {
             Cleared = true;
+            Saved = (null, null);
             return Task.CompletedTask;
         }
     }

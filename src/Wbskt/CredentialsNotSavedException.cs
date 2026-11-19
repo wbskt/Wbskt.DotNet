@@ -3,8 +3,9 @@ namespace Wbskt;
 /// <summary>
 /// The client registered but its storage could not save the new credentials, for example because the
 /// data folder is read-only. The client stops rather than retry, because each retry would register
-/// another client until the policy is full. Fix the storage, then remove the extra client
-/// (<see cref="ClientRefId"/>) in the console or keep it by saving its credentials yourself.
+/// another client until the policy is full. Fix the storage and start the same client again: it saves the
+/// credentials before it connects. If the process ended first, remove the extra client
+/// (<see cref="ClientRefId"/>) in the console.
 /// </summary>
 public sealed class CredentialsNotSavedException(Guid clientRefId, Exception inner)
     : InvalidOperationException(
