@@ -482,7 +482,7 @@ public sealed class WbsktClientTests
                 context.Response.Close();
             }
         });
-        await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), new ReadOnlyStorage());
+        await using var client = new WbsktClient(new ClientConfig($"http://127.0.0.1:{port}", "ws://127.0.0.1:1", "test", "pin"), new FakeWbskt.SavedStorage(null, null) { ReadOnly = true });
         Exception? raised = null;
         client.OnConnectFailed += error => raised = error;
 
@@ -563,15 +563,6 @@ public sealed class WbsktClientTests
     private sealed class MemoryStorage : IClientStorage
     {
         public Task SaveCredentialsAsync(Guid refId, string secret) => Task.CompletedTask;
-
-        public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult<(Guid?, string?)>((null, null));
-
-        public Task ClearCredentialsAsync() => Task.CompletedTask;
-    }
-
-    private sealed class ReadOnlyStorage : IClientStorage
-    {
-        public Task SaveCredentialsAsync(Guid refId, string secret) => throw new UnauthorizedAccessException("Access to the path '/data/wbskt/test.json' is denied.");
 
         public Task<(Guid? RefId, string? Secret)> LoadCredentialsAsync() => Task.FromResult<(Guid?, string?)>((null, null));
 
