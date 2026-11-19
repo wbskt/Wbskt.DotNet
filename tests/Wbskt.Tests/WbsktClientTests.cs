@@ -499,6 +499,64 @@ public sealed class WbsktClientTests
         }
     }
 
+    [Fact]
+    public async Task A_secret_saved_after_a_refusal_is_used_by_the_next_start_of_the_same_client()
+    {
+        await using var server = new FakeWbskt { RefusedSecret = "old-secret" };
+        var refId = Guid.NewGuid();
+        var storage = new FakeWbskt.SavedStorage(refId, "old-secret");
+        await using var client = server.NewClient(new ClientConfig(server.Url, server.SocketUrl, "test", "pin"), storage);
+
+        var start = () => client.StartAsync();
+        await start.Should().ThrowAsync<CredentialsRejectedException>();
+        await storage.SaveCredentialsAsync(refId, "new-secret");
+        await client.StartAsync();
+
+        await server.WaitForAsync(MessageTypes.Capabilities);
+        server.Logins.Should().Be(2);
+        server.Registrations.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Credentials_cleared_after_a_refusal_register_again_on_the_next_start()
+    {
+        await using var server = new FakeWbskt { RefusedSecret = "old-secret" };
+        var storage = new FakeWbskt.SavedStorage(Guid.NewGuid(), "old-secret");
+        await using var client = server.NewClient(new ClientConfig(server.Url, server.SocketUrl, "test", "pin"), storage);
+
+        var start = () => client.StartAsync();
+        await start.Should().ThrowAsync<CredentialsRejectedException>();
+        await storage.ClearCredentialsAsync();
+        await client.StartAsync();
+
+        await server.WaitForAsync(MessageTypes.Capabilities);
+        server.Registrations.Should().Be(1);
+        storage.Saved.Secret.Should().Be("registered");
+    }
+
+    [Fact]
+    public async Task Credentials_not_saved_are_saved_before_the_next_start_connects()
+    {
+        await using var server = new FakeWbskt();
+        var storage = new FakeWbskt.SavedStorage(null, null) { ReadOnly = true };
+        await using var client = server.NewClient(new ClientConfig(server.Url, server.SocketUrl, "test", "pin"), storage);
+
+        var start = () => client.StartAsync();
+        var refused = (await start.Should().ThrowAsync<CredentialsNotSavedException>()).Which;
+        server.Logins.Should().Be(0);
+
+        // Still read-only: refused again, and nothing logs in with credentials only this process holds.
+        (await start.Should().ThrowAsync<CredentialsNotSavedException>()).Which.ClientRefId.Should().Be(refused.ClientRefId);
+        server.Logins.Should().Be(0);
+
+        storage.ReadOnly = false;
+        await client.StartAsync();
+
+        await server.WaitForAsync(MessageTypes.Capabilities);
+        storage.Saved.Should().Be((refused.ClientRefId, "registered"));
+        server.Registrations.Should().Be(1);
+    }
+
     private static WbsktClient NewClient(string? pin = "pin") =>
         new(new ClientConfig("http://127.0.0.1:1", "ws://127.0.0.1:1", "test", pin), new MemoryStorage());
 
